@@ -15,7 +15,7 @@ jobs:
   check:
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
 
       # go.mod replaces xray-core with a sibling checkout. CI reproduces that
       # from upstream at the pinned commit; the two patches in patches/ change
@@ -24,7 +24,7 @@ jobs:
         run: git clone --quiet https://github.com/XTLS/Xray-core.git ../xray-tunnet
           && git -C ../xray-tunnet checkout --quiet "$XRAY_CORE_REF"
 
-      - uses: actions/setup-go@v5
+      - uses: actions/setup-go@v7
         with:
           go-version: '1.26'
 
