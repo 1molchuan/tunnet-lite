@@ -245,7 +245,59 @@ configured.
   traffic through the SOCKS listener, or bring your own tun2socks.
 - **UDP end to end.** See above; blocked by the nodes, not by this code.
 
-## Licence and use
+## Trust model
+
+Read this before assuming the client protects you from anything it does not.
+
+**The operator still sees your traffic.** The exit node terminates your
+connection to the internet. Reimplementing the client changes nothing about
+that: everything not end-to-end encrypted above the tunnel is visible to
+whoever runs the exit, exactly as with the vendor client.
+
+**Only the client is open.** The control plane, the CDN entry layer and the exit
+nodes are the operator's closed infrastructure. You can audit what this program
+sends and what it trusts; you cannot audit what happens after the tunnel ends.
+
+**What authenticates the node directory: TLS, and nothing else.** Control-plane
+responses are HPKE-sealed to a fresh X25519 key per request, which gives
+*confidentiality* — an on-path observer cannot read the directory. It does not
+give *authenticity*: HPKE base mode has no sender authentication, so anyone able
+to read a request (which carries the response public key) could seal a forged
+directory back. The only thing preventing that is certificate validation on the
+control endpoint, using the system root store.
+
+The practical consequence: **a rogue root CA on your machine — corporate TLS
+inspection, or malware — could substitute the node directory**, pointing this
+client at nodes it controls, with keys it controls.
+
+**The data plane is strongly bound, but only downstream of that.** VLESS
+Encryption authenticates each node by the X25519 public key from the directory,
+so an attacker cannot complete the handshake without that node's private key,
+even if it intercepts the TLS layer. That guarantee is only as good as the
+directory it starts from.
+
+### Known gap versus the vendor client
+
+The vendor binary pins certificates (`PinnedPeerCertSha256`) and resolves its
+control domain over its own DoH upstreams. This client does neither: it uses a
+plain `http.Client` with the system root store and system DNS. On a machine with
+a clean trust store the outcome is the same; on a machine with an injected root,
+the vendor client is harder to redirect than this one.
+
+Pinning the control endpoint is the obvious hardening step and is not
+implemented yet.
+
+## Licence
+
+The code in this repository is MIT (see `LICENSE`).
+
+It links `xray-core`, which is **Mozilla Public License 2.0**. The patches in
+`patches/` modify MPL-covered files and remain under the MPL; they are shipped
+as patches precisely so those modifications stay visible and attributable. A
+binary built from this repository is a combined work: honour both licences when
+distributing it.
+
+## Use
 
 This is an interoperability client. It expects *your* credentials. Do not
 publish an inventory or an identity file: `client_id` is an account-level

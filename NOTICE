@@ -1,0 +1,14 @@
+tunnet-lite
+Copyright (c) 2026 tunnet-lite contributors
+Licensed under the MIT License; see LICENSE.
+
+This software links Xray-core, which is licensed under the
+Mozilla Public License 2.0:
+
+    https://github.com/XTLS/Xray-core
+    https://mozilla.org/MPL/2.0/
+
+The files under patches/ modify MPL-covered source files. Those modifications
+remain subject to the MPL and are distributed here in patch form so they stay
+identifiable. A binary built from this repository is a combined work covered by
+both licences.
