@@ -22,6 +22,18 @@ from stdin, so the binary works the same over SSH as it does locally.
 
 ## Quick start
 
+`xray-core` is pinned through a `replace` to a sibling checkout, and two fixes
+in `patches/` are required for the operator front proxy and for entry failover.
+Set that up once:
+
+```bash
+git clone https://github.com/XTLS/Xray-core.git ../xray-tunnet
+git -C ../xray-tunnet checkout f02a35786124a6ad046727f2408e32317cc19a41
+git -C ../xray-tunnet apply "$PWD/patches/xray-core-http-outbound.patch"
+```
+
+Then:
+
 ```bash
 go build -o tunnet-lite ./
 

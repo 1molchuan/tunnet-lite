@@ -9,7 +9,7 @@ import (
 	"path/filepath"
 	"time"
 
-	"github.com/example/tunnet-lite/internal/inventory"
+	"github.com/1molchuan/tunnet-lite/internal/inventory"
 )
 
 // NeedsAuthorizationError reports that the identity exists but has not been

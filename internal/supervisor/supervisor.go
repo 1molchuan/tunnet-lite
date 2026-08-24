@@ -8,10 +8,10 @@ import (
 	"log"
 	"time"
 
-	"github.com/example/tunnet-lite/internal/engine"
-	"github.com/example/tunnet-lite/internal/inventory"
-	"github.com/example/tunnet-lite/internal/probe"
-	"github.com/example/tunnet-lite/internal/xcfg"
+	"github.com/1molchuan/tunnet-lite/internal/engine"
+	"github.com/1molchuan/tunnet-lite/internal/inventory"
+	"github.com/1molchuan/tunnet-lite/internal/probe"
+	"github.com/1molchuan/tunnet-lite/internal/xcfg"
 )
 
 type Options struct {

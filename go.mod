@@ -1,4 +1,4 @@
-module github.com/example/tunnet-lite
+module github.com/1molchuan/tunnet-lite
 
 go 1.26.1
 

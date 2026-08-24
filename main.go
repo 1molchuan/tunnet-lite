@@ -17,12 +17,12 @@ import (
 	"syscall"
 	"time"
 
-	"github.com/example/tunnet-lite/internal/console"
-	"github.com/example/tunnet-lite/internal/control"
-	"github.com/example/tunnet-lite/internal/engine"
-	"github.com/example/tunnet-lite/internal/inventory"
-	"github.com/example/tunnet-lite/internal/supervisor"
-	"github.com/example/tunnet-lite/internal/xcfg"
+	"github.com/1molchuan/tunnet-lite/internal/console"
+	"github.com/1molchuan/tunnet-lite/internal/control"
+	"github.com/1molchuan/tunnet-lite/internal/engine"
+	"github.com/1molchuan/tunnet-lite/internal/inventory"
+	"github.com/1molchuan/tunnet-lite/internal/supervisor"
+	"github.com/1molchuan/tunnet-lite/internal/xcfg"
 )
 
 func main() {

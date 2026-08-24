@@ -5,7 +5,7 @@ import (
 	"errors"
 	"fmt"
 
-	"github.com/example/tunnet-lite/internal/inventory"
+	"github.com/1molchuan/tunnet-lite/internal/inventory"
 )
 
 // runtimePayload is the part of the directory this client needs. The payload

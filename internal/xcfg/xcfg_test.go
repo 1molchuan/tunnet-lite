@@ -6,7 +6,7 @@ import (
 	"testing"
 	"time"
 
-	"github.com/example/tunnet-lite/internal/inventory"
+	"github.com/1molchuan/tunnet-lite/internal/inventory"
 )
 
 func baseOptions() Options {

@@ -16,10 +16,10 @@ import (
 	"text/tabwriter"
 	"time"
 
-	"github.com/example/tunnet-lite/internal/control"
-	"github.com/example/tunnet-lite/internal/engine"
-	"github.com/example/tunnet-lite/internal/inventory"
-	"github.com/example/tunnet-lite/internal/supervisor"
+	"github.com/1molchuan/tunnet-lite/internal/control"
+	"github.com/1molchuan/tunnet-lite/internal/engine"
+	"github.com/1molchuan/tunnet-lite/internal/inventory"
+	"github.com/1molchuan/tunnet-lite/internal/supervisor"
 )
 
 // Console owns the mutable choices the operator edits between restarts.

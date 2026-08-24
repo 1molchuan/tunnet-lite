@@ -14,7 +14,7 @@ import (
 	"strings"
 	"time"
 
-	"github.com/example/tunnet-lite/internal/inventory"
+	"github.com/1molchuan/tunnet-lite/internal/inventory"
 )
 
 // Wire parameters confirmed against a live node.
