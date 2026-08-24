@@ -18,8 +18,10 @@ import (
 	"encoding/json"
 	"fmt"
 	"io"
+	"log"
 	"net/http"
 	"strings"
+	"sync"
 	"time"
 )
 
@@ -39,6 +41,9 @@ type Client struct {
 	AppVersion string
 	HTTP       *http.Client
 	Identity   *Identity
+	ExpectECH  bool
+
+	reportTLS sync.Once
 }
 
 func NewClient(id *Identity) *Client {
@@ -160,6 +165,8 @@ func (c *Client) call(ctx context.Context, operation string, body []byte) ([]byt
 	}
 	defer resp.Body.Close()
 
+	c.reportTLSOnce(resp)
+
 	payload, err := io.ReadAll(io.LimitReader(resp.Body, 8<<20))
 	if err != nil {
 		return nil, fmt.Errorf("%s: %w", operation, err)
@@ -175,6 +182,26 @@ func (c *Client) call(ctx context.Context, operation string, body []byte) ([]byt
 		return nil, fmt.Errorf("%s: decrypt response: %w", operation, err)
 	}
 	return plain, nil
+}
+
+// reportTLSOnce states, once per client, whether the protections that were
+// configured actually took effect. Configuring ECH and having the server accept
+// it are different things, and a silent downgrade is exactly what this is meant
+// to make visible.
+func (c *Client) reportTLSOnce(resp *http.Response) {
+	c.reportTLS.Do(func() {
+		if resp.TLS == nil {
+			return
+		}
+		if !c.ExpectECH {
+			return
+		}
+		if resp.TLS.ECHAccepted {
+			log.Printf("control TLS: ECH accepted, hostname hidden from the handshake")
+			return
+		}
+		log.Printf("control TLS: ECH not in effect, the hostname is visible in the handshake")
+	})
 }
 
 func (c *Client) signedRequest(ctx context.Context, ex *exchange, body []byte, now time.Time) (*http.Request, error) {

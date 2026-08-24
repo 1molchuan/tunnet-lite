@@ -72,6 +72,10 @@ the node keys. Both are in `.gitignore` and must stay out of version control.
 | `-root <domain>` | pin a root domain instead of using the cached choice |
 | `-dump-config` | print the rendered Xray config and exit |
 | `-port 18080` | SOCKS port |
+| `-doh <urls>` | comma-separated IP-literal DoH endpoints; `off` uses system DNS |
+| `-ech=true` | require ECH on the control connection; failure is fatal |
+| `-pin-mode tofu` | certificate pinning mode: `off`, `tofu`, or `strict` |
+| `-pins <path>` | pin store path (default: `tunnet-lite-pins.json`) |
 
 ## Control plane
 
@@ -91,6 +95,19 @@ authority, path, content type, digest and both key headers. Responses are HPKE
 sealed to a fresh X25519 key generated per request, bound to the operation, the
 client id and the request nonce, so terminating TLS in between does not reveal
 the directory.
+
+Before that exchange, the client resolves the control endpoint's A, AAAA and
+HTTPS records through the same two IP-literal DoH services used by the vendor
+client. The HTTPS record supplies the ECH configuration. ECH is required by
+default: failure to obtain the configuration, or a handshake in which the
+server does not accept it, aborts the connection instead of silently exposing
+the hostname. Explicitly use `-ech=false` to opt out; `-doh=off` also requires
+that explicit opt-out.
+
+Normal Web PKI verification is followed by SPKI pinning. The default `tofu`
+mode records the verified chain on first use and rejects later chains that share
+none of those keys. `strict` refuses first use unless pins already exist. The
+pin file is a local trust anchor and is excluded from version control.
 
 The two responses differ in shape, which matters:
 
@@ -258,17 +275,19 @@ whoever runs the exit, exactly as with the vendor client.
 nodes are the operator's closed infrastructure. You can audit what this program
 sends and what it trusts; you cannot audit what happens after the tunnel ends.
 
-**What authenticates the node directory: TLS, and nothing else.** Control-plane
+**What authenticates the node directory: hardened TLS.** Control-plane
 responses are HPKE-sealed to a fresh X25519 key per request, which gives
 *confidentiality* — an on-path observer cannot read the directory. It does not
 give *authenticity*: HPKE base mode has no sender authentication, so anyone able
 to read a request (which carries the response public key) could seal a forged
-directory back. The only thing preventing that is certificate validation on the
-control endpoint, using the system root store.
+directory back. Authenticity therefore comes from normal certificate validation
+plus the locally stored SPKI pins on the control endpoint.
 
-The practical consequence: **a rogue root CA on your machine — corporate TLS
-inspection, or malware — could substitute the node directory**, pointing this
-client at nodes it controls, with keys it controls.
+After a clean TOFU enrollment, a later rogue root CA on the machine — corporate
+TLS inspection or malware — cannot substitute the directory unless its chain
+also matches a stored key. The first TOFU connection is still decisive: an
+attacker already active at enrollment time can establish the wrong pins. Use a
+pre-reviewed store with `-pin-mode strict` when that risk matters.
 
 **The data plane is strongly bound, but only downstream of that.** VLESS
 Encryption authenticates each node by the X25519 public key from the directory,
@@ -276,16 +295,13 @@ so an attacker cannot complete the handshake without that node's private key,
 even if it intercepts the TLS layer. That guarantee is only as good as the
 directory it starts from.
 
-### Known gap versus the vendor client
+### Residual control-plane risk
 
-The vendor binary pins certificates (`PinnedPeerCertSha256`) and resolves its
-control domain over its own DoH upstreams. This client does neither: it uses a
-plain `http.Client` with the system root store and system DNS. On a machine with
-a clean trust store the outcome is the same; on a machine with an injected root,
-the vendor client is harder to redirect than this one.
-
-Pinning the control endpoint is the obvious hardening step and is not
-implemented yet.
+The client now matches the vendor's three relevant transport controls: dedicated
+DoH, ECH and certificate pinning. TOFU is an operational compromise rather than
+a vendor-signed pin distribution channel. Deleting or replacing the local pin
+store resets that trust decision; the program never updates mismatched pins
+automatically.
 
 ## Licence
 

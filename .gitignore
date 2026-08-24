@@ -3,6 +3,7 @@
 nodes.json
 *-identity.json
 *-state.json
+*-pins.json
 
 # Build output and local artefacts
 tunnet-lite
@@ -10,5 +11,6 @@ tunnet-lite.exe
 access2nodes
 access2nodes.exe
 *.exe
+*.exe~
 *.log
 .ctltest/

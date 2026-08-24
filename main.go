@@ -14,6 +14,7 @@ import (
 	"log"
 	"os"
 	"os/signal"
+	"strings"
 	"syscall"
 	"time"
 
@@ -21,130 +22,253 @@ import (
 	"github.com/1molchuan/tunnet-lite/internal/control"
 	"github.com/1molchuan/tunnet-lite/internal/engine"
 	"github.com/1molchuan/tunnet-lite/internal/inventory"
+	"github.com/1molchuan/tunnet-lite/internal/pinning"
+	"github.com/1molchuan/tunnet-lite/internal/resolver"
 	"github.com/1molchuan/tunnet-lite/internal/supervisor"
 	"github.com/1molchuan/tunnet-lite/internal/xcfg"
 )
 
 func main() {
 	log.SetFlags(log.Ltime)
-
-	var (
-		nodesPath = flag.String("nodes", "nodes.json", "node inventory file")
-		listen    = flag.String("listen", "127.0.0.1", "SOCKS bind address")
-		port      = flag.Int("port", 18080, "SOCKS port")
-		udp       = flag.Bool("udp", false, "enable SOCKS UDP associate (see README: the nodes reject mux, so UDP does not traverse)")
-
-		host  = flag.String("host", "", "exit slug (default: first online host)")
-		group = flag.String("entry-group", "", "operator ingress name or substring (default: first)")
-		root  = flag.String("root", "", "pin a root domain (default: cached, else random)")
-
-		noFront    = flag.Bool("no-front", false, "dial the CDN directly, skipping the front proxy")
-		maxEntries = flag.Int("max-entries", 0, "cap how many entry addresses enter the pool (0 = all reachable)")
-		probeTO    = flag.Duration("probe-timeout", 3*time.Second, "TCP probe timeout for entry ranking")
-
-		probeURL       = flag.String("health-url", "", "health check URL (default: gstatic generate_204)")
-		healthInterval = flag.Duration("health-interval", 60*time.Second, "health check interval; must exceed -health-timeout")
-		healthTimeout  = flag.Duration("health-timeout", 15*time.Second, "health check timeout; each probe builds a full tunnel")
-
-		mode    = flag.String("enc-mode", xcfg.DefaultMode, "VLESS Encryption mode: native, xorpub or random")
-		rtt     = flag.String("enc-rtt", xcfg.DefaultRTT, "VLESS Encryption handshake: 1rtt or 0rtt")
-		padding = flag.String("enc-padding", xcfg.DefaultPadding, "VLESS Encryption padding spec")
-		flow    = flag.String("flow", xcfg.DefaultFlow, "VLESS flow; use \"none\" to disable it")
-
-		identity    = flag.String("identity", "tunnet-lite-identity.json", "path for the persisted control-plane identity")
-		refresh     = flag.Bool("refresh", false, "fetch the node inventory from the control plane, then exit")
-		autoApprove = flag.Bool("auto-approve", false, "approve a pending authorisation without opening the verification page")
-		verifyURL   = flag.String("verify-url", "", "override the verification page URL")
-		controlURL  = flag.String("control-url", control.DefaultEndpoint, "control-plane endpoint")
-
-		interactive = flag.Bool("console", false, "drop into the interactive console instead of just serving")
-		statePath   = flag.String("state", "tunnet-lite-state.json", "path for persisted choices")
-		logLevel    = flag.String("log-level", "warning", "xray log level")
-		dump        = flag.Bool("dump-config", false, "print the rendered config and exit")
-	)
-	flag.Parse()
-
+	options := parseCLI()
 	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
 	defer stop()
-
-	if *refresh {
-		if err := refreshInventory(ctx, *identity, *nodesPath, *controlURL, *autoApprove, *verifyURL); err != nil {
-			log.Fatalf("%v", err)
-		}
-		return
-	}
-
-	opts := supervisor.Options{
-		Listen: *listen, Port: *port, UDP: *udp,
-		HostSlug: *host, EntryGroup: *group, RootDomain: *root,
-		NoFront: *noFront, MaxEntries: *maxEntries, ProbeTimeout: *probeTO,
-		ProbeURL: *probeURL, HealthInterval: *healthInterval, HealthTimeout: *healthTimeout,
-		Mode: *mode, RTT: *rtt, Padding: *padding, Flow: *flow,
-		StatePath: *statePath, LogLevel: *logLevel,
-	}
-
-	inv, err := inventory.Load(*nodesPath)
-	if err != nil {
-		log.Fatalf("%v", err)
-	}
-
-	if *dump {
-		_, configJSON, err := supervisor.Resolve(ctx, inv, opts)
-		if err != nil {
-			log.Fatalf("%v", err)
-		}
-		fmt.Println(string(configJSON))
-		return
-	}
-
-	if err := run(ctx, inv, opts, *interactive, *identity, *nodesPath); err != nil {
+	if err := execute(ctx, options); err != nil {
 		log.Fatalf("%v", err)
 	}
 }
 
-func run(ctx context.Context, inv *inventory.Inventory, opts supervisor.Options,
-	interactive bool, identityPath, nodesPath string) error {
+type cliOptions struct {
+	nodesPath   string
+	identity    string
+	controlURL  string
+	dohList     string
+	pinMode     string
+	pinsPath    string
+	verifyURL   string
+	useECH      bool
+	refresh     bool
+	autoApprove bool
+	interactive bool
+	dump        bool
+	supervisor  supervisor.Options
+}
+
+func parseCLI() cliOptions {
+	var options cliOptions
+	registerProxyFlags(&options)
+	registerWireFlags(&options)
+	registerControlFlags(&options)
+	flag.Parse()
+	return options
+}
+
+func registerProxyFlags(options *cliOptions) {
+	flag.StringVar(&options.nodesPath, "nodes", "nodes.json", "node inventory file")
+	flag.StringVar(&options.supervisor.Listen, "listen", "127.0.0.1", "SOCKS bind address")
+	flag.IntVar(&options.supervisor.Port, "port", 18080, "SOCKS port")
+	flag.BoolVar(&options.supervisor.UDP, "udp", false, "enable SOCKS UDP associate (nodes reject mux)")
+	flag.StringVar(&options.supervisor.HostSlug, "host", "", "exit slug (default: first online host)")
+	flag.StringVar(&options.supervisor.EntryGroup, "entry-group", "", "operator ingress name or substring")
+	flag.StringVar(&options.supervisor.RootDomain, "root", "", "pin a root domain")
+	flag.BoolVar(&options.supervisor.NoFront, "no-front", false, "dial the CDN directly")
+	flag.IntVar(&options.supervisor.MaxEntries, "max-entries", 0, "cap entry addresses (0 = all reachable)")
+	flag.DurationVar(&options.supervisor.ProbeTimeout, "probe-timeout", 3*time.Second, "entry TCP probe timeout")
+}
+
+func registerWireFlags(options *cliOptions) {
+	flag.StringVar(&options.supervisor.ProbeURL, "health-url", "", "health check URL")
+	flag.DurationVar(&options.supervisor.HealthInterval, "health-interval", 60*time.Second, "health check interval")
+	flag.DurationVar(&options.supervisor.HealthTimeout, "health-timeout", 15*time.Second, "health check timeout")
+	flag.StringVar(&options.supervisor.Mode, "enc-mode", xcfg.DefaultMode, "VLESS Encryption mode")
+	flag.StringVar(&options.supervisor.RTT, "enc-rtt", xcfg.DefaultRTT, "VLESS Encryption handshake")
+	flag.StringVar(&options.supervisor.Padding, "enc-padding", xcfg.DefaultPadding, "VLESS Encryption padding")
+	flag.StringVar(&options.supervisor.Flow, "flow", xcfg.DefaultFlow, "VLESS flow; use \"none\" to disable")
+	flag.StringVar(&options.supervisor.StatePath, "state", "tunnet-lite-state.json", "persisted choices")
+	flag.StringVar(&options.supervisor.LogLevel, "log-level", "warning", "xray log level")
+	flag.BoolVar(&options.interactive, "console", false, "open the interactive console")
+	flag.BoolVar(&options.dump, "dump-config", false, "print the rendered config and exit")
+}
+
+func registerControlFlags(options *cliOptions) {
+	flag.StringVar(&options.identity, "identity", "tunnet-lite-identity.json", "control-plane identity path")
+	flag.BoolVar(&options.refresh, "refresh", false, "fetch the node inventory, then exit")
+	flag.BoolVar(&options.autoApprove, "auto-approve", false, "approve a pending authorisation")
+	flag.StringVar(&options.verifyURL, "verify-url", "", "override the verification page URL")
+	flag.StringVar(&options.controlURL, "control-url", control.DefaultEndpoint, "control-plane endpoint")
+	flag.StringVar(&options.dohList, "doh", "", "IP-literal DoH URLs; \"off\" uses system DNS")
+	flag.BoolVar(&options.useECH, "ech", true, "require ECH on the control connection")
+	flag.StringVar(&options.pinMode, "pin-mode", "tofu", "certificate pinning: off, tofu or strict")
+	flag.StringVar(&options.pinsPath, "pins", "tunnet-lite-pins.json", "certificate pin store")
+}
+
+// sessionPaths groups everything needed to reach the control plane.
+type sessionPaths struct {
+	identity   string
+	nodes      string
+	controlURL string
+}
+
+type runConfig struct {
+	supervisor  supervisor.Options
+	interactive bool
+	paths       sessionPaths
+	hardening   control.Hardening
+}
+
+type refreshConfig struct {
+	paths       sessionPaths
+	hardening   control.Hardening
+	autoApprove bool
+	verifyURL   string
+}
+
+func execute(ctx context.Context, options cliOptions) error {
+	hardening, err := buildHardening(options.dohList, options.useECH, options.pinMode, options.pinsPath)
+	if err != nil {
+		return err
+	}
+	paths := sessionPaths{options.identity, options.nodesPath, options.controlURL}
+	if options.refresh {
+		return refreshInventory(ctx, refreshConfig{
+			paths: paths, hardening: hardening,
+			autoApprove: options.autoApprove, verifyURL: options.verifyURL,
+		})
+	}
+	inv, err := inventory.Load(options.nodesPath)
+	if err != nil {
+		return err
+	}
+	if options.dump {
+		return dumpConfig(ctx, inv, options.supervisor)
+	}
+	return run(ctx, inv, runConfig{
+		supervisor: options.supervisor, interactive: options.interactive,
+		paths: paths, hardening: hardening,
+	})
+}
+
+func dumpConfig(ctx context.Context, inv *inventory.Inventory, options supervisor.Options) error {
+	_, configJSON, err := supervisor.Resolve(ctx, inv, options)
+	if err != nil {
+		return err
+	}
+	fmt.Println(string(configJSON))
+	return nil
+}
+
+// buildHardening turns the transport flags into a configuration. DoH, ECH and
+// pinning are separable, but they protect different things: DoH and ECH keep
+// the control hostname private, pinning is what makes the directory hard to
+// forge. Turning one off does not substitute for another.
+func buildHardening(dohList string, useECH bool, pinMode, pinsPath string) (control.Hardening, error) {
+	var h control.Hardening
+	var err error
+
+	switch dohList {
+	case "off":
+		if useECH {
+			return h, errors.New("-ech=true requires DoH; use -ech=false with -doh=off")
+		}
+	case "":
+		h.Resolver, err = resolver.NewDoH()
+		h.ECH = useECH
+	default:
+		h.Resolver, err = resolver.NewDoH(strings.Split(dohList, ",")...)
+		h.ECH = useECH
+	}
+	if err != nil {
+		return h, err
+	}
+
+	mode, err := pinning.ParseMode(pinMode)
+	if err != nil {
+		return h, err
+	}
+	h.PinMode = mode
+	if mode != pinning.ModeOff {
+		store, err := pinning.Open(pinsPath)
+		if err != nil {
+			return h, err
+		}
+		h.Pins = store
+	}
+	return h, nil
+}
+
+// openSession creates or loads the identity and points it at a hardened
+// transport.
+func openSession(ctx context.Context, p sessionPaths, h control.Hardening) (*control.Session, bool, error) {
+	session, fresh, err := control.Open(p.identity, p.nodes)
+	if err != nil {
+		return nil, false, err
+	}
+	session.Client.Endpoint = p.controlURL
+	session.Client.ExpectECH = h.ECH
+
+	client, err := control.NewHardenedClient(ctx, p.controlURL, h)
+	if err != nil {
+		return nil, false, err
+	}
+	session.Client.HTTP = client
+	return session, fresh, nil
+}
+
+func run(ctx context.Context, inv *inventory.Inventory, config runConfig) error {
 	eng := engine.New()
 	defer eng.Stop()
 
-	if _, err := supervisor.Start(ctx, eng, inv, opts); err != nil {
+	if _, err := supervisor.Start(ctx, eng, inv, config.supervisor); err != nil {
 		return err
 	}
 
-	if !interactive {
+	if !config.interactive {
 		<-ctx.Done()
 		log.Printf("shutting down")
 		return nil
 	}
 
-	// The console can refresh the inventory only if an identity already exists;
-	// creating one stays an explicit step rather than a side effect.
-	var session *control.Session
-	if s, fresh, err := control.Open(identityPath, nodesPath); err == nil && !fresh {
-		session = s
+	session, err := openExistingSession(ctx, config.paths, config.hardening)
+	if err != nil {
+		return err
 	}
-
-	err := console.New(eng, inv, opts, session, os.Stdin, os.Stdout).Run(ctx)
+	err = console.New(eng, inv, config.supervisor, session, os.Stdin, os.Stdout).Run(ctx)
 	log.Printf("shutting down")
 	return err
+}
+
+func openExistingSession(ctx context.Context, paths sessionPaths, hardening control.Hardening) (*control.Session, error) {
+	_, err := os.Stat(paths.identity)
+	if errors.Is(err, os.ErrNotExist) {
+		return nil, nil
+	}
+	if err != nil {
+		return nil, err
+	}
+	session, fresh, err := openSession(ctx, paths, hardening)
+	if err != nil {
+		return nil, err
+	}
+	if fresh {
+		return nil, errors.New("existing identity unexpectedly reopened as new")
+	}
+	return session, nil
 }
 
 // refreshInventory pulls a fresh directory from the control plane. A brand new
 // identity has to be approved once; after that the same identity refreshes
 // silently with a sync.
-func refreshInventory(ctx context.Context, identityPath, nodesPath, controlURL string,
-	autoApprove bool, verifyURL string) error {
-	session, fresh, err := control.Open(identityPath, nodesPath)
+func refreshInventory(ctx context.Context, config refreshConfig) error {
+	session, fresh, err := openSession(ctx, config.paths, config.hardening)
 	if err != nil {
 		return err
 	}
-	session.Client.Endpoint = controlURL
 	if fresh {
-		log.Printf("created a new client identity at %s", identityPath)
+		log.Printf("created a new client identity at %s", config.paths.identity)
 	}
 
 	inv, err := session.Refresh(ctx, control.RefreshOptions{
-		AutoApprove: autoApprove, VerificationURL: verifyURL,
+		AutoApprove: config.autoApprove, VerificationURL: config.verifyURL,
 	})
 	var needsAuth *control.NeedsAuthorizationError
 	if errors.As(err, &needsAuth) {
@@ -157,6 +281,6 @@ func refreshInventory(ctx context.Context, identityPath, nodesPath, controlURL s
 	}
 
 	log.Printf("wrote %s: %d hosts, %d entry groups, %d root domains",
-		nodesPath, len(inv.Hosts), len(inv.EntryGroups), len(inv.RootDomains))
+		config.paths.nodes, len(inv.Hosts), len(inv.EntryGroups), len(inv.RootDomains))
 	return nil
 }
