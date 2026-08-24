@@ -1,0 +1,39 @@
+name: ci
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+env:
+  # The commit this project is validated against. Bumping it is a change that
+  # must be re-validated against a live node with sweep/sweep.py, not a routine
+  # dependency update. See the README.
+  XRAY_CORE_REF: f02a35786124a6ad046727f2408e32317cc19a41
+
+jobs:
+  check:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      # go.mod replaces xray-core with a sibling checkout. CI reproduces that
+      # from upstream at the pinned commit; the two patches in patches/ change
+      # runtime behaviour only, so building and testing without them is valid.
+      - name: Provide the pinned xray-core
+        run: git clone --quiet https://github.com/XTLS/Xray-core.git ../xray-tunnet
+          && git -C ../xray-tunnet checkout --quiet "$XRAY_CORE_REF"
+
+      - uses: actions/setup-go@v5
+        with:
+          go-version: '1.26'
+
+      - name: gofmt
+        run: test -z "$(gofmt -l .)" || { gofmt -l .; exit 1; }
+
+      - run: go vet ./...
+      - run: go test ./...
+      - run: go build ./...
+
+      - name: Patches still apply
+        run: git -C ../xray-tunnet apply --check "$GITHUB_WORKSPACE/patches/xray-core-http-outbound.patch"

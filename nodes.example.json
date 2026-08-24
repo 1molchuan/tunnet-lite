@@ -1,0 +1,25 @@
+{
+  "client_id": "00000000-0000-4000-8000-000000000000",
+  "root_domains": ["example-one.invalid", "example-two.invalid"],
+  "hosts": [
+    {
+      "slug": "tyo-01",
+      "name": "Tokyo 01",
+      "online": true,
+      "vless_encryption_key": "AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA"
+    }
+  ],
+  "entry_groups": [
+    {
+      "name": "example ingress",
+      "ipv4": ["192.0.2.1", "192.0.2.2"],
+      "front_proxy": {
+        "endpoint": "http://198.51.100.1:443",
+        "headers": {
+          "Host": "cdn.example.invalid:443",
+          "X-Example-Auth": "0000000000"
+        }
+      }
+    }
+  ]
+}

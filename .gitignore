@@ -1,0 +1,14 @@
+# Credentials: the inventory carries the account id and node keys, the identity
+# file carries the signing key. Neither may ever be committed.
+nodes.json
+*-identity.json
+*-state.json
+
+# Build output and local artefacts
+tunnet-lite
+tunnet-lite.exe
+access2nodes
+access2nodes.exe
+*.exe
+*.log
+.ctltest/

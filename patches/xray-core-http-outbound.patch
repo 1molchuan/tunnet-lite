@@ -1,0 +1,99 @@
+Two generic fixes to xray-core's HTTP outbound, required by tunnet-lite.
+Apply on top of upstream commit f02a35786124a6ad046727f2408e32317cc19a41.
+
+1. CONNECT could not honour a configured Host header, and redirecting it
+   to req.Host alone rewrites the tunnel authority, so the real target is
+   pinned in URL.Opaque first.
+2. fillRequestHeader demanded inbound session metadata for any configured
+   header, which made such an outbound impossible to health-check.
+
+See the project README for the symptoms each one produces.
+
+diff --git a/proxy/http/client.go b/proxy/http/client.go
+index 0e50edb..749d5aa 100644
+--- a/proxy/http/client.go
++++ b/proxy/http/client.go
+@@ -8,6 +8,7 @@ import (
+ 	"io"
+ 	"net/http"
+ 	"net/url"
++	"strings"
+ 	"sync"
+ 	"text/template"
+ 
+@@ -169,20 +170,37 @@ func fillRequestHeader(ctx context.Context, header []*Header) ([]*Header, error)
+ 		return header, nil
+ 	}
+ 
++	templated := false
++	for _, h := range header {
++		if strings.Contains(h.Value, "{{") {
++			templated = true
++			break
++		}
++	}
++
+ 	inbound := session.InboundFromContext(ctx)
+ 	outbounds := session.OutboundsFromContext(ctx)
+-	ob := outbounds[len(outbounds)-1]
++	var ob *session.Outbound
++	if len(outbounds) > 0 {
++		ob = outbounds[len(outbounds)-1]
++	}
+ 
+-	if inbound == nil || ob == nil {
++	// Only templated header values need session metadata. Requiring it
++	// unconditionally makes any outbound with static "headers" unusable from
++	// contexts that carry no inbound, such as burstObservatory health checks.
++	if templated && (inbound == nil || ob == nil) {
+ 		return nil, errors.New("missing inbound or outbound metadata from context")
+ 	}
+ 
+ 	data := struct {
+ 		Source net.Destination
+ 		Target net.Destination
+-	}{
+-		Source: inbound.Source,
+-		Target: ob.Target,
++	}{}
++	if inbound != nil {
++		data.Source = inbound.Source
++	}
++	if ob != nil {
++		data.Target = ob.Target
+ 	}
+ 
+ 	filled := make([]*Header, len(header))
+@@ -218,12 +236,24 @@ func setUpHTTPTunnel(ctx context.Context, dest net.Destination, target string, u
+ 	}
+ 
+ 	for _, h := range header {
++		// Go's Request.Write excludes Header["Host"] and emits req.Host instead,
++		// so a configured Host must go through req.Host. For CONNECT it also
++		// derives the request-URI from req.Host, so pin the real tunnel target
++		// in URL.Opaque first, otherwise the authority would be rewritten too.
++		if strings.EqualFold(h.Key, "Host") {
++			if req.URL.Opaque == "" {
++				req.URL.Opaque = target
++			}
++			req.Host = h.Value
++			continue
++		}
+ 		req.Header.Set(h.Key, h.Value)
+ 	}
+ 	utils.TryDefaultHeadersWith(req.Header, "nav")
+ 
+ 	connectHTTP1 := func(rawConn net.Conn) (net.Conn, error) {
+ 		req.Header.Set("Proxy-Connection", "Keep-Alive")
++		errors.LogDebug(ctx, "HTTP-CONNECT ", req.URL.Opaque, " Host=", req.Host, " via ", rawConn.RemoteAddr())
+ 
+ 		err := req.Write(rawConn)
+ 		if err != nil {
+@@ -238,6 +268,7 @@ func setUpHTTPTunnel(ctx context.Context, dest net.Destination, target string, u
+ 		}
+ 		defer resp.Body.Close()
+ 
++		errors.LogDebug(ctx, "HTTP-CONNECT response ", resp.Status)
+ 		if resp.StatusCode != http.StatusOK {
+ 			rawConn.Close()
+ 			return nil, errors.New("Proxy responded with non 200 code: " + resp.Status)

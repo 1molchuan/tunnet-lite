@@ -1,0 +1,133 @@
+Optional: diagnostics and a timing tweak. Not required for connectivity.
+
+- splithttp: log each XHTTP request and wait for the downlink response
+  headers before starting the uplink, matching the vendor client's order.
+- vless/encryption: log each handshake stage, and surface the AEAD open
+  error that upstream discards.
+
+diff --git a/proxy/vless/encryption/client.go b/proxy/vless/encryption/client.go
+index 2eb4340..f3fa291 100644
+--- a/proxy/vless/encryption/client.go
++++ b/proxy/vless/encryption/client.go
+@@ -1,6 +1,7 @@
+ package encryption
+ 
+ import (
++	"context"
+ 	"crypto/cipher"
+ 	"crypto/ecdh"
+ 	"crypto/mlkem"
+@@ -72,6 +73,10 @@ func (i *ClientInstance) Handshake(conn net.Conn) (*CommonConn, error) {
+ 	pfsKeyExchangeLength := 18 + 1184 + 32 + 16
+ 	paddingLength, paddingLens, paddingGaps := CreatPadding(i.PaddingLens, i.PaddingGaps)
+ 	clientHello := make([]byte, ivAndRealysLength+pfsKeyExchangeLength+paddingLength)
++	errors.LogInfo(context.Background(), "VLESSENC hello shape: total=", len(clientHello),
++		" ivAndRelays=", ivAndRealysLength, " pfsKX=", pfsKeyExchangeLength, " padding=", paddingLength,
++		" fragments=", paddingLens, " gaps=", paddingGaps,
++		" xorMode=", i.XorMode, " seconds=", i.Seconds, " nfsKeys=", len(i.NfsPKeys))
+ 
+ 	iv := clientHello[:16]
+ 	rand.Read(iv)
+@@ -151,14 +156,22 @@ func (i *ClientInstance) Handshake(conn net.Conn) (*CommonConn, error) {
+ 			time.Sleep(paddingGaps[i])
+ 		}
+ 	}
++	errors.LogInfo(context.Background(), "VLESSENC hello sent, waiting for server pfs public key (", 1088+32+16, " bytes)")
+ 
+ 	encryptedPfsPublicKey := make([]byte, 1088+32+16)
+-	if _, err := io.ReadFull(conn, encryptedPfsPublicKey); err != nil {
++	if n, err := io.ReadFull(conn, encryptedPfsPublicKey); err != nil {
++		errors.LogInfoInner(context.Background(), err, "VLESSENC read server pfs public key failed after ", n, " bytes")
+ 		return nil, err
+ 	}
+-	nfsAEAD.Open(encryptedPfsPublicKey[:0], MaxNonce, encryptedPfsPublicKey, nil)
++	errors.LogInfo(context.Background(), "VLESSENC server pfs public key received")
++	if _, err := nfsAEAD.Open(encryptedPfsPublicKey[:0], MaxNonce, encryptedPfsPublicKey, nil); err != nil {
++		errors.LogInfoInner(context.Background(), err, "VLESSENC nfsAEAD.Open of server pfs public key failed")
++		return nil, err
++	}
++	errors.LogInfo(context.Background(), "VLESSENC server pfs public key decrypted")
+ 	mlkem768Key, err := mlkem768DKey.Decapsulate(encryptedPfsPublicKey[:1088])
+ 	if err != nil {
++		errors.LogInfoInner(context.Background(), err, "VLESSENC ML-KEM-768 decapsulate failed")
+ 		return nil, err
+ 	}
+ 	peerX25519PKey, err := ecdh.X25519().NewPublicKey(encryptedPfsPublicKey[1088 : 1088+32])
+@@ -177,12 +190,15 @@ func (i *ClientInstance) Handshake(conn net.Conn) (*CommonConn, error) {
+ 	c.PeerAEAD = NewAEAD(encryptedPfsPublicKey[:1088+32], c.UnitedKey, c.UseAES)
+ 
+ 	encryptedTicket := make([]byte, 32)
+-	if _, err := io.ReadFull(conn, encryptedTicket); err != nil {
++	if n, err := io.ReadFull(conn, encryptedTicket); err != nil {
++		errors.LogInfoInner(context.Background(), err, "VLESSENC read server ticket failed after ", n, " bytes")
+ 		return nil, err
+ 	}
+ 	if _, err := c.PeerAEAD.Open(encryptedTicket[:0], nil, encryptedTicket, nil); err != nil {
++		errors.LogInfoInner(context.Background(), err, "VLESSENC open server ticket failed")
+ 		return nil, err
+ 	}
++	errors.LogInfo(context.Background(), "VLESSENC server ticket ok")
+ 	seconds := DecodeLength(encryptedTicket)
+ 
+ 	if i.Seconds > 0 && seconds > 0 {
+@@ -194,13 +210,16 @@ func (i *ClientInstance) Handshake(conn net.Conn) (*CommonConn, error) {
+ 	}
+ 
+ 	encryptedLength := make([]byte, 18)
+-	if _, err := io.ReadFull(conn, encryptedLength); err != nil {
++	if n, err := io.ReadFull(conn, encryptedLength); err != nil {
++		errors.LogInfoInner(context.Background(), err, "VLESSENC read server padding length failed after ", n, " bytes")
+ 		return nil, err
+ 	}
+ 	if _, err := c.PeerAEAD.Open(encryptedLength[:0], nil, encryptedLength, nil); err != nil {
++		errors.LogInfoInner(context.Background(), err, "VLESSENC open server padding length failed")
+ 		return nil, err
+ 	}
+ 	length := DecodeLength(encryptedLength[:2])
++	errors.LogInfo(context.Background(), "VLESSENC handshake complete, server padding length=", length)
+ 	c.PeerPadding = make([]byte, length) // important: allows server sends padding slowly, eliminating 1-RTT's traffic pattern
+ 
+ 	if i.XorMode == 2 {
+diff --git a/transport/internet/splithttp/client.go b/transport/internet/splithttp/client.go
+index 0e3a73f..9f36bb5 100644
+--- a/transport/internet/splithttp/client.go
++++ b/transport/internet/splithttp/client.go
+@@ -66,20 +66,27 @@ func (c *DefaultDialerClient) OpenStream(ctx context.Context, url string, sessio
+ 		return nil, nil, nil, err
+ 	}
+ 	c.transportConfig.FillStreamRequest(req, sessionId, "")
++	errors.LogInfo(ctx, "XHTTP ", method, " -> ", req.URL.String(), " host=", req.Host,
++		" session=", sessionId, " uploadOnly=", uploadOnly, " ct=", req.Header.Get("Content-Type"))
+ 
+ 	wrc = &WaitReadCloser{Wait: make(chan struct{})}
++	responseReady := make(chan struct{})
+ 	go func() {
++		defer close(responseReady)
+ 		resp, err := c.client.Do(req)
+ 		if err != nil {
++			errors.LogInfoInner(ctx, err, "XHTTP "+method+" request failed")
+ 			if !uploadOnly { // stream-down is enough
+ 				c.closed = true
+-				errors.LogInfoInner(ctx, err, "failed to "+method+" "+url)
+ 			}
+ 			gotConn.Close()
+ 			common.Close(body)
+ 			wrc.Close()
+ 			return
+ 		}
++		errors.LogInfo(ctx, "XHTTP ", method, " response status ", resp.StatusCode,
++			", content-type ", resp.Header.Get("Content-Type"),
++			", content-encoding ", resp.Header.Get("Content-Encoding"))
+ 		if resp.StatusCode != 200 && !uploadOnly {
+ 			errors.LogInfo(ctx, "unexpected status ", resp.StatusCode)
+ 		}
+@@ -94,6 +101,9 @@ func (c *DefaultDialerClient) OpenStream(ctx context.Context, url string, sessio
+ 	}()
+ 
+ 	<-gotConn.Wait()
++	if !uploadOnly {
++		<-responseReady
++	}
+ 	return
+ }
+ 
