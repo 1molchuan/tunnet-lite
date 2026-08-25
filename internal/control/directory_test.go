@@ -89,3 +89,33 @@ func TestParseDirectoryRejectsPayloadWithoutRuntime(t *testing.T) {
 		t.Fatal("expected an error when no runtime section is present")
 	}
 }
+
+// An approved identity gets the whole directory back from bootstrap, with the
+// runtime at the top level and the root-domain pool included. That payload is
+// what recovers a client which was approved but never obtained a directory, so
+// it has to validate on its own without anything to merge into.
+func TestABootstrapPayloadIsUsableOnItsOwn(t *testing.T) {
+	body := fmt.Sprintf(hostsAndEntries, fakeKey())
+	payload := []byte(`{"schema_version":2,"access":{"state":"ready"},
+		"release":{"minimum_version":"0.2.5"},
+		"runtime":{` + body + `,"network":{"root_domains":["a.example"]}}}`)
+
+	inv, err := ParseInventory(payload)
+	if err != nil {
+		t.Fatalf("a bootstrap payload should validate unaided: %v", err)
+	}
+	if len(inv.Hosts) != 1 || len(inv.EntryGroups) != 1 || len(inv.RootDomains) != 1 {
+		t.Errorf("incomplete inventory: %d hosts, %d groups, %d roots",
+			len(inv.Hosts), len(inv.EntryGroups), len(inv.RootDomains))
+	}
+}
+
+// A bootstrap that only asks for approval must not be mistaken for a directory,
+// or the client would report success and then have nothing to dial.
+func TestAnUnapprovedBootstrapIsNotADirectory(t *testing.T) {
+	payload := []byte(`{"access":{"state":"pending","ticket":"abc",
+		"verify":"https://access.example/#abc"},"release":{"minimum_version":"0.2.5"}}`)
+	if _, err := ParseInventory(payload); err == nil {
+		t.Fatal("a payload with no runtime should not parse as a directory")
+	}
+}

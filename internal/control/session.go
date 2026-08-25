@@ -96,8 +96,18 @@ func (s *Session) Refresh(ctx context.Context, o RefreshOptions) (*inventory.Inv
 	if err != nil {
 		return nil, err
 	}
+
+	// An approved identity gets the whole directory back from bootstrap,
+	// root-domain pool included. This is the path that recovers a client which
+	// was approved but never obtained a directory, and which therefore has
+	// neither a usable sync nor a ticket left to redeem.
+	if inv, parseErr := ParseInventory(boot.Raw); parseErr == nil {
+		s.clearTicket()
+		return inv, s.persist(inv)
+	}
+
 	if boot.Ticket == "" {
-		// The identity is known but sync did not yield a directory, so the sync
+		// The identity is known but nothing yielded a directory, so the sync
 		// failure is the real problem rather than a missing authorisation.
 		return nil, fmt.Errorf("no directory available (bootstrap state %q); sync failed: %w", boot.State, syncErr)
 	}
