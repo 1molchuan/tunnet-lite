@@ -17,6 +17,10 @@ const HomeEnv = "TUNNET_LITE_HOME"
 
 const appDir = "tunnet-lite"
 
+// userConfigDir is a variable so tests can point the default somewhere
+// harmless instead of at the developer's own configuration directory.
+var userConfigDir = os.UserConfigDir
+
 // Paths is the resolved location of everything the client persists.
 type Paths struct {
 	Dir      string
@@ -41,11 +45,15 @@ var legacy = map[string]string{
 // in the working directory keeps being used so an existing setup is not
 // silently abandoned along with its authorisation.
 func Resolve(dir string) (Paths, error) {
+	// An explicitly chosen directory is a statement of intent and must not be
+	// second-guessed by files that happen to sit in the working directory.
+	explicit := dir != ""
 	if dir == "" {
 		dir = os.Getenv(HomeEnv)
+		explicit = dir != ""
 	}
 	if dir == "" {
-		base, err := os.UserConfigDir()
+		base, err := userConfigDir()
 		if err != nil {
 			// No configuration directory to speak of: the working directory is
 			// a worse default but better than refusing to run.
@@ -65,6 +73,9 @@ func Resolve(dir string) (Paths, error) {
 		Pins:     filepath.Join(abs, "pins.json"),
 		State:    filepath.Join(abs, "state.json"),
 		Assets:   filepath.Join(abs, "assets"),
+	}
+	if explicit {
+		return p, nil
 	}
 	return withLegacy(p, false), nil
 }

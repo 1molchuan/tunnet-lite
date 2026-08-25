@@ -18,11 +18,18 @@ import (
 type Identity struct {
 	ClientID   string
 	SigningKey ed25519.PrivateKey
+
+	// PendingTicket is an authorisation waiting to be approved. Approval
+	// happens in a browser, between one run and the next, so the ticket has to
+	// outlive the process that obtained it — otherwise the run that follows
+	// approval has no way to exchange it for the directory.
+	PendingTicket string
 }
 
 type identityFile struct {
-	ClientID   string `json:"client_id"`
-	SigningKey string `json:"signing_key"`
+	ClientID      string `json:"client_id"`
+	SigningKey    string `json:"signing_key"`
+	PendingTicket string `json:"pending_ticket,omitempty"`
 }
 
 func NewIdentity() (*Identity, error) {
@@ -65,7 +72,7 @@ func LoadIdentity(path string) (*Identity, error) {
 	if f.ClientID == "" {
 		return nil, errors.New("stored identity has no client id")
 	}
-	return &Identity{ClientID: f.ClientID, SigningKey: key}, nil
+	return &Identity{ClientID: f.ClientID, SigningKey: key, PendingTicket: f.PendingTicket}, nil
 }
 
 // Save writes the identity with owner-only permissions. It holds a private key
@@ -75,8 +82,9 @@ func (id *Identity) Save(path string) error {
 		return err
 	}
 	data, err := json.MarshalIndent(identityFile{
-		ClientID:   id.ClientID,
-		SigningKey: base64.RawURLEncoding.EncodeToString(id.SigningKey),
+		ClientID:      id.ClientID,
+		SigningKey:    base64.RawURLEncoding.EncodeToString(id.SigningKey),
+		PendingTicket: id.PendingTicket,
 	}, "", "  ")
 	if err != nil {
 		return err

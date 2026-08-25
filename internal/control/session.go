@@ -80,6 +80,18 @@ func (s *Session) Refresh(ctx context.Context, o RefreshOptions) (*inventory.Inv
 		return inv, s.persist(inv)
 	}
 
+	// A ticket approved between runs is redeemed here. Sync alone cannot start
+	// a client off: its payload omits the root-domain pool, which only ever
+	// arrives with a full access response, so the first directory has to come
+	// from access even though the identity is already authorised.
+	if ticket := s.Client.Identity.PendingTicket; ticket != "" {
+		inv, err := s.Complete(ctx, ticket)
+		if err == nil {
+			s.clearTicket()
+			return inv, nil
+		}
+	}
+
 	boot, err := s.Client.Bootstrap(ctx)
 	if err != nil {
 		return nil, err
@@ -89,6 +101,7 @@ func (s *Session) Refresh(ctx context.Context, o RefreshOptions) (*inventory.Inv
 		// failure is the real problem rather than a missing authorisation.
 		return nil, fmt.Errorf("no directory available (bootstrap state %q); sync failed: %w", boot.State, syncErr)
 	}
+	s.rememberTicket(boot.Ticket)
 
 	verifyURL := o.VerificationURL
 	if verifyURL == "" {
@@ -108,15 +121,32 @@ func (s *Session) Refresh(ctx context.Context, o RefreshOptions) (*inventory.Inv
 		}
 	}
 
-	payload, err := s.Client.Access(ctx, boot.Ticket)
+	inv, err = s.Complete(ctx, boot.Ticket)
 	if err != nil {
 		return nil, err
 	}
-	inv, err = ParseInventory(payload)
-	if err != nil {
-		return nil, err
+	s.clearTicket()
+	return inv, nil
+}
+
+// rememberTicket stores an unapproved ticket so the run that follows approval
+// can redeem it. Failing to store it is not fatal: the next run falls back to
+// bootstrapping a fresh ticket.
+func (s *Session) rememberTicket(ticket string) {
+	s.Client.Identity.PendingTicket = ticket
+	if err := s.Client.Identity.Save(s.IdentityPath); err != nil {
+		log.Printf("warning: could not record the pending authorisation: %v", err)
 	}
-	return inv, s.persist(inv)
+}
+
+func (s *Session) clearTicket() {
+	if s.Client.Identity.PendingTicket == "" {
+		return
+	}
+	s.Client.Identity.PendingTicket = ""
+	if err := s.Client.Identity.Save(s.IdentityPath); err != nil {
+		log.Printf("warning: could not clear the redeemed authorisation: %v", err)
+	}
 }
 
 // Complete finishes an authorisation that a human approved out of band.

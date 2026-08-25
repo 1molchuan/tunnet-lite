@@ -22,6 +22,14 @@ func inTempDir(t *testing.T) string {
 	return dir
 }
 
+// withConfigDir redirects the per-user configuration directory for one test.
+func withConfigDir(t *testing.T, dir string) {
+	t.Helper()
+	previous := userConfigDir
+	userConfigDir = func() (string, error) { return dir, nil }
+	t.Cleanup(func() { userConfigDir = previous })
+}
+
 func TestAnExplicitDirectoryWins(t *testing.T) {
 	inTempDir(t)
 	t.Setenv(HomeEnv, filepath.Join("should", "be", "ignored"))
@@ -79,7 +87,8 @@ func TestTheDefaultIsAbsoluteAndOutsideTheWorkingDirectory(t *testing.T) {
 // abandon the authorisation attached to the old identity.
 func TestAFileLeftByAnEarlierVersionIsStillUsed(t *testing.T) {
 	inTempDir(t)
-	t.Setenv(HomeEnv, t.TempDir())
+	t.Setenv(HomeEnv, "")
+	withConfigDir(t, t.TempDir())
 
 	if err := os.WriteFile("tunnet-lite-identity.json", []byte("{}"), 0o600); err != nil {
 		t.Fatal(err)
@@ -104,8 +113,12 @@ func TestAFileLeftByAnEarlierVersionIsStillUsed(t *testing.T) {
 // leftover cannot shadow the current one.
 func TestTheNewLocationWinsWhenBothExist(t *testing.T) {
 	inTempDir(t)
-	home := t.TempDir()
-	t.Setenv(HomeEnv, home)
+	t.Setenv(HomeEnv, "")
+	home := filepath.Join(t.TempDir(), appDir)
+	if err := os.MkdirAll(home, 0o700); err != nil {
+		t.Fatal(err)
+	}
+	withConfigDir(t, filepath.Dir(home))
 
 	if err := os.WriteFile("tunnet-lite-identity.json", []byte("{}"), 0o600); err != nil {
 		t.Fatal(err)
@@ -139,5 +152,43 @@ func TestEnsureDirCreatesAnOwnerOnlyDirectory(t *testing.T) {
 	}
 	if !info.IsDir() {
 		t.Fatal("not a directory")
+	}
+}
+
+// An explicit directory is a statement of intent: a file that happens to sit in
+// the working directory must not quietly take precedence over it.
+func TestAnExplicitDirectoryIgnoresLegacyFiles(t *testing.T) {
+	inTempDir(t)
+	if err := os.WriteFile("tunnet-lite-identity.json", []byte("{}"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+
+	want := t.TempDir()
+	p, err := Resolve(want)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if p.Identity != filepath.Join(want, "identity.json") {
+		t.Errorf("identity = %q, want it under the directory that was asked for", p.Identity)
+	}
+	if p.UsingLegacy() {
+		t.Error("an explicit directory should never be reported as legacy")
+	}
+}
+
+func TestTheEnvironmentAlsoIgnoresLegacyFiles(t *testing.T) {
+	inTempDir(t)
+	if err := os.WriteFile("nodes.json", []byte("{}"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	want := t.TempDir()
+	t.Setenv(HomeEnv, want)
+
+	p, err := Resolve("")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if p.Nodes != filepath.Join(want, "nodes.json") {
+		t.Errorf("nodes = %q, want it under %q", p.Nodes, want)
 	}
 }
