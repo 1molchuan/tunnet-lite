@@ -342,8 +342,15 @@ configured.
 
 ## Not implemented
 
-- **TUN.** `xray-core` has no built-in TUN; the vendor client uses gVisor. Route
-  traffic through the SOCKS listener, or bring your own tun2socks.
+- **TUN.** Not wired up here, though the pieces are present: the pinned
+  `xray-core` ships a `tun` inbound built on gVisor and, on Windows, wintun —
+  the same components the vendor client uses. What is missing is the work
+  around it. A TUN interface needs administrator privileges, it needs a DNS
+  configuration of its own (system lookups would otherwise enter the tunnel,
+  where UDP does not travel, and queries for the control and node domains would
+  loop), and installing a default route is a machine-wide change that leaves the
+  host without network if it is not cleaned up. Until that is done, route
+  traffic through the SOCKS listener.
 - **UDP end to end.** See above; blocked by the nodes, not by this code.
 
 ## Trust model

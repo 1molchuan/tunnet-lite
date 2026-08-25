@@ -253,7 +253,11 @@ python3 sweep/sweep.py --nodes nodes.json --attempts 2
 
 ## 未实现
 
-- **TUN。** `xray-core` 没有内置 TUN；原版客户端用的是 gVisor。请让流量走 SOCKS 监听，或者自己接 tun2socks。
+- **TUN。** 这里没有接，但零件是齐的：钉住的 `xray-core` 自带基于 gVisor 的 `tun`
+  入站，Windows 上用 wintun——和原版客户端是同一套组件。缺的是它周围的工作。TUN
+  网卡需要管理员权限；需要自己一套 DNS 配置（否则系统查询会进隧道，而 UDP 在这些节点上走不通，
+  且控制面域名和节点域名的查询会成环）；装默认路由是**全机生效**的改动，清理不干净会让整台机器断网。
+  在这些做完之前，请让流量走 SOCKS 监听。
 - **端到端 UDP。** 见上文；被节点挡住，不是本代码的问题。
 
 ## 信任模型
