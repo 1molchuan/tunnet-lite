@@ -58,6 +58,10 @@ type cliOptions struct {
 }
 
 func parseCLI() cliOptions {
+	// The default flag set names itself after argv[0], which under an npm
+	// install is the full path into node_modules. Name it after the command.
+	flag.CommandLine = flag.NewFlagSet("tunnet-lite", flag.ExitOnError)
+
 	var options cliOptions
 	registerProxyFlags(&options)
 	registerWireFlags(&options)

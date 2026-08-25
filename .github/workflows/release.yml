@@ -1,0 +1,83 @@
+name: release
+
+on:
+  push:
+    tags: ["v*"]
+  workflow_dispatch:
+    inputs:
+      version:
+        description: "Version to publish, without the leading v"
+        required: true
+
+env:
+  XRAY_CORE_REF: f02a35786124a6ad046727f2408e32317cc19a41
+
+jobs:
+  publish:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/checkout@v7
+
+      # go.mod replaces xray-core with a sibling checkout, and the CONNECT fix
+      # in patches/ is required for the operator front proxy to work at all.
+      # A release must carry it; CI's build-only job can skip it, this cannot.
+      - name: Provide the patched xray-core
+        run: |
+          git clone --quiet https://github.com/XTLS/Xray-core.git ../xray-tunnet
+          git -C ../xray-tunnet checkout --quiet "$XRAY_CORE_REF"
+          git -C ../xray-tunnet apply "$GITHUB_WORKSPACE/patches/xray-core-http-outbound.patch"
+
+      - uses: actions/setup-go@v7
+        with:
+          go-version: "1.26"
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+          registry-url: "https://registry.npmjs.org"
+
+      - name: Resolve version
+        id: version
+        run: |
+          if [ "${{ github.event_name }}" = "workflow_dispatch" ]; then
+            echo "value=${{ inputs.version }}" >> "$GITHUB_OUTPUT"
+          else
+            echo "value=${GITHUB_REF_NAME#v}" >> "$GITHUB_OUTPUT"
+          fi
+
+      - run: go test ./...
+
+      - name: Build the npm packages
+        run: sh tools/build-npm.sh "${{ steps.version.outputs.value }}" dist/npm
+
+      # Platform packages first: the launcher depends on them, and publishing it
+      # against versions that do not exist yet would leave installs broken for
+      # as long as the gap lasts.
+      - name: Publish
+        run: |
+          for dir in dist/npm/tunnet-lite-*; do
+            npm publish "$dir" --access public
+          done
+          npm publish dist/npm/tunnet-lite --access public
+        env:
+          NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}
+
+      - name: Attach the binaries to the release
+        run: |
+          mkdir -p dist/bin
+          for dir in dist/npm/tunnet-lite-*-*; do
+            name=$(basename "$dir")
+            for file in "$dir"/bin/*; do
+              case "$file" in
+                *.exe) cp "$file" "dist/bin/$name.exe" ;;
+                *)     cp "$file" "dist/bin/$name" ;;
+              esac
+            done
+          done
+          gh release create "v${{ steps.version.outputs.value }}" dist/bin/* \
+            --title "v${{ steps.version.outputs.value }}" --generate-notes || \
+          gh release upload "v${{ steps.version.outputs.value }}" dist/bin/* --clobber
+        env:
+          GH_TOKEN: ${{ github.token }}

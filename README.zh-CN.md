@@ -17,7 +17,21 @@ SOCKS 127.0.0.1:18080
 
 没有图形界面、不起 HTTP 服务、不依赖任何 UI 框架：控制台从 stdin 读命令，所以在 SSH 里和在本地用起来完全一样。
 
-## 快速开始
+## 安装
+
+```bash
+npm install -g tunnet-lite
+tunnet-lite -refresh
+tunnet-lite -console
+```
+
+程序本身是 Go 二进制而不是 JavaScript；用 npm 只是为了把它装到机器上并让 `tunnet-lite` 进 PATH。二进制放在按平台拆分的包里，由 npm 的 `os` / `cpu` 字段选中，所以安装只会下载**一个约 12 MB** 的包，而不是六个平台的构建。
+
+这些平台包被声明为 `optionalDependencies`，正是为了让不匹配当前主机的那五个被跳过而不是导致安装失败——反过来说，用 `--omit=optional` 安装会什么都装不到，这种情况下启动器会明确告诉你。
+
+如果你不想经过 npm，每个 GitHub Release 也附带了预编译二进制。
+
+## 从源码构建
 
 `xray-core` 通过 `replace` 钉死到同级目录的一份 checkout，并且需要 `patches/` 里的两个补丁——运营商前置代理和入口故障转移都依赖它们。这一步只做一次：
 

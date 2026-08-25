@@ -19,3 +19,9 @@ access2nodes.exe
 assets/
 *.dat
 *.sha256sum
+
+# npm packaging output
+.npmdist/
+dist/
+*.tgz
+.xbuild/

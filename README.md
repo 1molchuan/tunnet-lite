@@ -22,7 +22,26 @@ plane at run time, or from an inventory file you supply.
 No GUI, no web server, no external UI dependencies: the console reads commands
 from stdin, so the binary works the same over SSH as it does locally.
 
-## Quick start
+## Install
+
+```bash
+npm install -g tunnet-lite
+tunnet-lite -refresh
+tunnet-lite -console
+```
+
+The program is a Go binary, not JavaScript; npm is used only as a way to get it
+onto a machine and put `tunnet-lite` on the path. The binary lives in a
+per-platform package selected through npm's `os` and `cpu` fields, so installing
+fetches one ~12 MB download rather than all six builds. Those packages are
+optional dependencies precisely so the five that do not match the host are
+skipped rather than failing the install — which also means `--omit=optional`
+leaves nothing to run, and the launcher says so plainly if that happens.
+
+Prebuilt binaries are also attached to each GitHub release if you would rather
+not involve npm at all.
+
+## Building from source
 
 `xray-core` is pinned through a `replace` to a sibling checkout, and two fixes
 in `patches/` are required for the operator front proxy and for entry failover.
