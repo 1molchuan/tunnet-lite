@@ -1,5 +1,7 @@
 # tunnet-lite
 
+[中文文档](README.zh-CN.md)
+
 An open-source backend for the TunNet data plane: a local SOCKS proxy that
 speaks the same tunnel the vendor client speaks, built on `xray-core` used as a
 library, with an interactive terminal console for switching routes.
@@ -57,10 +59,45 @@ exit         sin-01 — Singapore
 ```
 
 Without `-console` the binary starts the proxy and serves until interrupted,
-which is what you want under a service manager.
+which is what you want under a service manager:
 
-`nodes.json` and `tunnet-lite-identity.json` carry your account credential and
-the node keys. Both are in `.gitignore` and must stay out of version control.
+```bash
+./tunnet-lite -host tyo-01 -entry-group 电信
+```
+
+`nodes.json`, `tunnet-lite-identity.json` and `tunnet-lite-pins.json` carry your
+account credential, signing key and pinned certificates. All three are in
+`.gitignore` and must stay out of version control.
+
+### Pointing traffic at it
+
+```bash
+curl --proxy socks5h://127.0.0.1:18080 https://api.ipify.org
+```
+
+**Use `socks5h`, not `socks5`.** The trailing `h` resolves names at the proxy.
+Plain `socks5` resolves locally over UDP, which these nodes do not carry (see
+below), so the lookup leaks outside the tunnel. In Firefox the equivalent switch
+is `network.proxy.socks_remote_dns`.
+
+### Console commands
+
+| Command | Effect |
+|---|---|
+| `status` | show what is running |
+| `exits` | list exit nodes |
+| `entries` | list operator ingresses |
+| `exit <slug\|#>` | select the exit node |
+| `entry <name\|#>` | select the operator ingress |
+| `udp on\|off` | toggle SOCKS UDP associate |
+| `direct on\|off` | bypass the front proxy |
+| `start` | apply the current selection |
+| `stop` | stop the proxy |
+| `refresh` | fetch a fresh node directory |
+| `quit` | leave; the proxy stops with it |
+
+Selections do not take effect until `start`, which re-probes the entry pool and
+rebuilds the tunnel.
 
 | Flag | Meaning |
 |---|---|
@@ -253,6 +290,8 @@ configured.
 | `internal/engine` | owns the running xray-core instance; restartable |
 | `internal/supervisor` | resolves choices, ranks entries, applies a plan |
 | `internal/console` | interactive terminal front end, no dependencies |
+| `internal/resolver` | DoH resolution and ECH config lookup over IP-literal upstreams |
+| `internal/pinning` | certificate chain SPKI pinning |
 | `tools/access2nodes` | converts an already-decrypted response to an inventory |
 | `sweep/` | wire-parameter re-validation |
 
