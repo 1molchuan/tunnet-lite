@@ -172,6 +172,13 @@ gzip-compressed and embedded in the binary under the name `builtin:smart`.
 3. **access** — exchanges the approved ticket for the full directory.
 4. **sync** — refreshes an already approved identity on later runs.
 
+The directory is withheld from clients below a version floor: the response then
+carries only a release block, with no runtime section, which reads as a puzzling
+"no runtime section" rather than as an upgrade demand. The floor is stated in
+that same response, so it is adopted and the call retried once. Node changes
+therefore keep arriving after the vendor raises it, rather than the client
+quietly going stale.
+
 Requests are signed with RFC 9421 HTTP Message Signatures over method,
 authority, path, content type, digest and both key headers. Responses are HPKE
 sealed to a fresh X25519 key generated per request, bound to the operation, the

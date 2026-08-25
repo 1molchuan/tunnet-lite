@@ -143,6 +143,10 @@ sh tools/fetch-rules.sh assets
 3. **access** —— 用已批准的票据换取完整目录。
 4. **sync** —— 后续运行时刷新已批准的身份。
 
+低于版本门槛的客户端拿不到目录：响应里只有一个 release 块、没有 runtime 段，表现为一句莫名其妙的
+「no runtime section」而不是「请升级」。门槛值就写在同一个响应里，所以客户端会采用它并重试一次。
+这样在厂商抬高门槛之后，节点变更仍然能继续同步进来，而不是悄无声息地过期。
+
 请求用 RFC 9421 HTTP Message Signatures 签名，覆盖 method、authority、path、content-type、digest 和两个密钥头。响应用 HPKE 密封到每次请求新生成的 X25519 密钥上，并绑定操作名、client id 和请求 nonce，所以即便中途终止 TLS 也读不到目录。
 
 在这次交换之前，客户端会通过原版客户端使用的同样两个纯 IP DoH 服务，解析控制面端点的 A、AAAA 和 HTTPS 记录。ECH 配置来自 HTTPS 记录。**ECH 默认是强制的**：拿不到配置、或者握手中服务端不接受它，都会中止连接，而不是悄悄暴露主机名。要放弃这层保护得显式写 `-ech=false`；用 `-doh=off` 同样需要这个显式选择。

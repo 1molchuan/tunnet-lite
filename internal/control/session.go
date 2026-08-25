@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"log"
 	"os"
 	"path/filepath"
 	"time"
@@ -139,6 +140,29 @@ func (s *Session) trySync(ctx context.Context) (*inventory.Inventory, error) {
 	if err != nil {
 		return nil, err
 	}
+	inv, err := s.parseSync(payload)
+	if err == nil {
+		return inv, nil
+	}
+
+	// A client below the advertised floor is answered with the release block
+	// and nothing else. The floor is in that answer, so adopt it and ask again
+	// rather than reporting a missing runtime section.
+	floor := MinimumVersion(payload)
+	if floor == "" || !versionLess(s.Client.AppVersion, floor) {
+		return nil, err
+	}
+	log.Printf("control plane requires client version %s; reporting it and retrying", floor)
+	s.Client.AppVersion = floor
+
+	payload, retryErr := s.Client.Sync(ctx)
+	if retryErr != nil {
+		return nil, retryErr
+	}
+	return s.parseSync(payload)
+}
+
+func (s *Session) parseSync(payload []byte) (*inventory.Inventory, error) {
 	inv, err := ParseDirectory(payload)
 	if err != nil {
 		return nil, err
