@@ -91,6 +91,7 @@ is `network.proxy.socks_remote_dns`.
 | `entry <name\|#>` | select the operator ingress |
 | `udp on\|off` | toggle SOCKS UDP associate |
 | `direct on\|off` | bypass the front proxy |
+| `route global\|smart` | choose how much traffic the tunnel carries |
 | `start` | apply the current selection |
 | `stop` | stop the proxy |
 | `refresh` | fetch a fresh node directory |
@@ -109,10 +110,54 @@ rebuilds the tunnel.
 | `-root <domain>` | pin a root domain instead of using the cached choice |
 | `-dump-config` | print the rendered Xray config and exit |
 | `-port 18080` | SOCKS port |
+| `-route smart` | keep mainland-China destinations local (needs the rule sets) |
+| `-assets <dir>` | where `geoip.dat` and `geosite.dat` live |
 | `-doh <urls>` | comma-separated IP-literal DoH endpoints; `off` uses system DNS |
 | `-ech=true` | require ECH on the control connection; failure is fatal |
 | `-pin-mode tofu` | certificate pinning mode: `off`, `tofu`, or `strict` |
 | `-pins <path>` | pin store path (default: `tunnet-lite-pins.json`) |
+
+## Routing
+
+Two modes. Both send private, loopback, link-local, carrier-NAT, multicast and
+reserved ranges straight out — those cannot meaningfully be proxied. The list is
+spelled out in the config rather than referring to `geoip:private`, so the
+default mode needs no data files at all.
+
+| Mode | Behaviour |
+|---|---|
+| `global` (default) | everything else goes through the tunnel |
+| `smart` | mainland-China destinations also stay local |
+
+Smart mode needs two rule sets. They are **not** vendored, so you can see which
+rules are in force and update them independently:
+
+```bash
+sh tools/fetch-rules.sh assets
+./tunnet-lite -route smart -assets assets
+```
+
+The script verifies each file against its published digest before installing it.
+That is not ceremony: a truncated download is not obviously broken, and surfaces
+much later as an unhelpful `EOF` from the geo data loader.
+
+Measured, with the same two destinations under each mode:
+
+| Destination | `global` | `smart` |
+|---|---|---|
+| `www.baidu.com` | tunnel | **direct** |
+| `api.ipify.org` | tunnel | tunnel |
+
+Rules are evaluated in order, and the domain set is consulted before the IP set.
+That ordering matters: a `socks5h` client hands over a *name*, and under the
+default `AsIs` strategy a name never matches an IP rule. `geosite:cn` therefore
+does the work for named destinations and `geoip:cn` covers connections made
+straight to an address. Pass `-route-domain-strategy IPIfNonMatch` to have the
+router resolve unmatched names locally and test them against the IP rules too —
+more accurate, at the cost of a local lookup for every unmatched name.
+
+The vendor client does the same split with its own copy of the same rule sets,
+gzip-compressed and embedded in the binary under the name `builtin:smart`.
 
 ## Control plane
 

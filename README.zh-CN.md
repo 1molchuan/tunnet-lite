@@ -78,6 +78,7 @@ curl --proxy socks5h://127.0.0.1:18080 https://api.ipify.org
 | `entry <名称\|编号>` | 选择运营商入口 |
 | `udp on\|off` | 开关 SOCKS UDP associate |
 | `direct on\|off` | 绕过前置代理 |
+| `route global\|smart` | 选择隧道承载多少流量 |
 | `start` | 应用当前选择 |
 | `stop` | 停止代理 |
 | `refresh` | 拉取最新节点目录 |
@@ -97,10 +98,41 @@ curl --proxy socks5h://127.0.0.1:18080 https://api.ipify.org
 | `-root <域名>` | 钉住某个根域名，不用缓存的选择 |
 | `-dump-config` | 打印生成的 Xray 配置后退出 |
 | `-port 18080` | SOCKS 端口 |
+| `-route smart` | 中国大陆目标直连（需要规则集） |
+| `-assets <目录>` | `geoip.dat` 和 `geosite.dat` 所在目录 |
 | `-doh <地址>` | 逗号分隔的纯 IP DoH 上游；`off` 表示用系统 DNS |
 | `-ech=true` | 控制面连接强制要求 ECH，失败即中止 |
 | `-pin-mode tofu` | 证书固定模式：`off`、`tofu`、`strict` |
 | `-pins <路径>` | pin 存储路径（默认 `tunnet-lite-pins.json`） |
+
+## 分流
+
+两种模式。两者都会把私有、环回、链路本地、运营商 NAT、组播和保留地址段直接送出去——这些走代理没有意义。这份列表是**直接写在配置里**的，而不是引用 `geoip:private`，所以默认模式完全不需要数据文件。
+
+| 模式 | 行为 |
+|---|---|
+| `global`（默认） | 其余全部走隧道 |
+| `smart` | 中国大陆目标也留在本地 |
+
+smart 模式需要两个规则集。它们**不内嵌**，这样你能看清当前生效的是哪些规则，也能自行更新：
+
+```bash
+sh tools/fetch-rules.sh assets
+./tunnet-lite -route smart -assets assets
+```
+
+脚本会先用官方发布的摘要校验，通过了才安装。这不是形式主义：**下载被截断时文件看起来是好的**，问题会在很久之后以 geo 数据加载器一句没头没脑的 `EOF` 暴露出来。
+
+实测，同样两个目标在两种模式下：
+
+| 目标 | `global` | `smart` |
+|---|---|---|
+| `www.baidu.com` | 隧道 | **直连** |
+| `api.ipify.org` | 隧道 | 隧道 |
+
+规则按顺序求值，且**域名规则排在 IP 规则之前**。这个顺序很关键：`socks5h` 客户端交过来的是**域名**，而在默认的 `AsIs` 策略下域名永远不会匹配 IP 规则。所以 `geosite:cn` 负责按名字的目标，`geoip:cn` 覆盖直接连 IP 的情况。加 `-route-domain-strategy IPIfNonMatch` 可以让路由器把未匹配的域名在本地解析后再用 IP 规则判断——更准确，代价是每个未匹配域名都要做一次本地解析。
+
+原版客户端做的是同样的分流，用的是同一套规则集的自有副本，gzip 压缩后内嵌在二进制里，名字叫 `builtin:smart`。
 
 ## 控制面
 

@@ -24,6 +24,12 @@ type Options struct {
 	NoFront    bool   // dial the CDN directly instead of via the front proxy
 	UDP        bool   // enable SOCKS UDP associate
 
+	// RouteMode decides how much traffic the tunnel carries; smart mode needs
+	// the rule sets under Assets.
+	RouteMode      xcfg.RouteMode
+	DomainStrategy string
+	Assets         string
+
 	MaxEntries   int
 	ProbeTimeout time.Duration
 
@@ -92,7 +98,8 @@ func Resolve(ctx context.Context, inv *inventory.Inventory, o Options) (engine.P
 	}
 
 	plan = engine.Plan{
-		HostSlug: host.Slug, HostName: host.Name,
+		RouteMode: string(o.RouteMode),
+		HostSlug:  host.Slug, HostName: host.Name,
 		LogicalHost: host.Slug + "." + root, RootDomain: root,
 		GroupName: group.Name, Entries: entries,
 		UDP: o.UDP, Listen: o.Listen, Port: o.Port,
@@ -106,6 +113,7 @@ func Resolve(ctx context.Context, inv *inventory.Inventory, o Options) (engine.P
 		ClientID: inv.ClientID, LogicalHost: plan.LogicalHost, EncryptionKey: key,
 		Entries: entries, FrontProxy: front, UDP: o.UDP,
 		Mode: o.Mode, RTT: o.RTT, Padding: o.Padding, Flow: o.Flow,
+		RouteMode: o.RouteMode, DomainStrategy: o.DomainStrategy,
 		ProbeURL: o.ProbeURL, ProbeInterval: o.HealthInterval, ProbeTimeout: o.HealthTimeout,
 		LogLevel: o.LogLevel,
 	})
@@ -139,6 +147,7 @@ func logPlan(p engine.Plan) {
 	if p.UDP {
 		udp = "tcp+udp"
 	}
+	log.Printf("routing %s", p.RouteMode)
 	log.Printf("listening on socks5://%s:%d (%s)", p.Listen, p.Port, udp)
 }
 

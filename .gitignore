@@ -14,3 +14,8 @@ access2nodes.exe
 *.exe~
 *.log
 .ctltest/
+
+# Rule sets are fetched, not vendored: tools/fetch-rules.sh
+assets/
+*.dat
+*.sha256sum

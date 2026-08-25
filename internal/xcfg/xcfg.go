@@ -42,6 +42,8 @@ const (
 	FlowNone = "none"
 
 	xhttpPath   = "/api/v1/sync/"
+	balancerTag = "entry-pool"
+	directTag   = "direct"
 	echResolver = "https://223.5.5.5/dns-query"
 )
 
@@ -62,6 +64,14 @@ type Options struct {
 
 	// UDP enables SOCKS UDP associate. Without it the listener is TCP-only.
 	UDP bool
+
+	// RouteMode selects how much traffic the tunnel carries. An empty value
+	// means RouteGlobal.
+	RouteMode RouteMode
+	// DomainStrategy is the router's strategy for turning names into
+	// addresses. Empty means "AsIs": names are matched against domain rules
+	// only, and nothing is resolved locally to test an IP rule.
+	DomainStrategy string
 
 	// Encryption wire parameters. Zero values fall back to the validated
 	// defaults above; they are settable so the sweep tool can drive them.
@@ -112,6 +122,9 @@ func (o *Options) applyDefaults() {
 	if o.LogLevel == "" {
 		o.LogLevel = "warning"
 	}
+	if o.RouteMode == "" {
+		o.RouteMode = RouteGlobal
+	}
 	if o.Listen == "" {
 		o.Listen = "127.0.0.1"
 	}
@@ -157,6 +170,21 @@ func Build(o Options) ([]byte, error) {
 		}
 		outbounds = append(outbounds, fp)
 	}
+	outbounds = append(outbounds, directOutbound())
+
+	routing := map[string]any{
+		"rules": o.routingRules(),
+		"balancers": []any{map[string]any{
+			"tag":      balancerTag,
+			"selector": []string{"entry-"},
+			"strategy": map[string]any{"type": "leastPing"},
+			// Best TCP RTT at startup; carries traffic until health data exists.
+			"fallbackTag": tags[0],
+		}},
+	}
+	if o.DomainStrategy != "" {
+		routing["domainStrategy"] = o.DomainStrategy
+	}
 
 	cfg := map[string]any{
 		"log": map[string]any{"loglevel": o.LogLevel},
@@ -168,18 +196,7 @@ func Build(o Options) ([]byte, error) {
 			"settings": map[string]any{"udp": o.UDP},
 		}},
 		"outbounds": outbounds,
-		"routing": map[string]any{
-			"rules": []any{map[string]any{
-				"type": "field", "network": "tcp,udp", "balancerTag": "entry-pool",
-			}},
-			"balancers": []any{map[string]any{
-				"tag":      "entry-pool",
-				"selector": []string{"entry-"},
-				"strategy": map[string]any{"type": "leastPing"},
-				// Best TCP RTT at startup; carries traffic until health data exists.
-				"fallbackTag": tags[0],
-			}},
-		},
+		"routing":   routing,
 		"burstObservatory": map[string]any{
 			"subjectSelector": []string{"entry-"},
 			"pingConfig": map[string]any{

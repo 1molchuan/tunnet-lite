@@ -23,6 +23,7 @@ type Plan struct {
 	FrontProxy  string   `json:"front_proxy,omitempty"`
 	Entries     []string `json:"entries"`
 	UDP         bool     `json:"udp"`
+	RouteMode   string   `json:"route_mode"`
 	Listen      string   `json:"listen"`
 	Port        int      `json:"port"`
 }

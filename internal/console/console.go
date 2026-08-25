@@ -20,6 +20,7 @@ import (
 	"github.com/1molchuan/tunnet-lite/internal/engine"
 	"github.com/1molchuan/tunnet-lite/internal/inventory"
 	"github.com/1molchuan/tunnet-lite/internal/supervisor"
+	"github.com/1molchuan/tunnet-lite/internal/xcfg"
 )
 
 // Console owns the mutable choices the operator edits between restarts.
@@ -61,6 +62,7 @@ func init() {
 		{"exit", "<slug|#>", "select the exit node", cmdSetExit},
 		{"entry", "<name|#>", "select the operator ingress", cmdSetEntry},
 		{"udp", "on|off", "toggle SOCKS UDP associate", cmdUDP},
+		{"route", "global|smart", "choose how much traffic the tunnel carries", cmdRoute},
 		{"direct", "on|off", "bypass the front proxy", cmdDirect},
 		{"start", "", "apply the current selection", cmdStart},
 		{"stop", "", "stop the proxy", cmdStop},
@@ -154,12 +156,14 @@ func (c *Console) showStatus() {
 		fmt.Fprintf(w, "host name\t%s\n", p.LogicalHost)
 		fmt.Fprintf(w, "entry\t%s\n", p.GroupName)
 		fmt.Fprintf(w, "front proxy\t%s\n", front)
+		fmt.Fprintf(w, "routing\t%s\n", p.RouteMode)
 		fmt.Fprintf(w, "pool\t%d addresses, best %s\n", len(p.Entries), p.Entries[0])
 	}
-	fmt.Fprintf(w, "selection\texit=%s entry=%s udp=%s direct=%s\n",
+	fmt.Fprintf(w, "selection\texit=%s entry=%s udp=%s direct=%s route=%s\n",
 		orDefault(c.opts.HostSlug, "(first online)"),
 		orDefault(c.opts.EntryGroup, "(first)"),
-		onOff(c.opts.UDP), onOff(c.opts.NoFront))
+		onOff(c.opts.UDP), onOff(c.opts.NoFront),
+		orDefault(string(c.opts.RouteMode), "global"))
 	w.Flush()
 }
 
@@ -247,6 +251,24 @@ func cmdDirect(_ context.Context, c *Console, arg string) error {
 		state = "bypassed"
 	}
 	c.printf("front proxy %s. Run \"start\" to apply.\n", state)
+	return nil
+}
+
+func cmdRoute(_ context.Context, c *Console, arg string) error {
+	if arg == "" {
+		return errors.New("usage: route global|smart")
+	}
+	mode, err := xcfg.ParseRouteMode(arg)
+	if err != nil {
+		return err
+	}
+	if mode == xcfg.RouteSmart {
+		if _, err := xcfg.ResolveAssets(c.opts.Assets); err != nil {
+			return fmt.Errorf("smart routing needs the rule sets: %w", err)
+		}
+	}
+	c.opts.RouteMode = mode
+	c.printf("routing set to %s. Run \"start\" to apply.\n", mode)
 	return nil
 }
 

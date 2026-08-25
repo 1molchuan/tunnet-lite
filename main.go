@@ -46,6 +46,7 @@ type cliOptions struct {
 	pinMode     string
 	pinsPath    string
 	verifyURL   string
+	routeMode   string
 	useECH      bool
 	refresh     bool
 	autoApprove bool
@@ -72,6 +73,12 @@ func registerProxyFlags(options *cliOptions) {
 	flag.StringVar(&options.supervisor.EntryGroup, "entry-group", "", "operator ingress name or substring")
 	flag.StringVar(&options.supervisor.RootDomain, "root", "", "pin a root domain")
 	flag.BoolVar(&options.supervisor.NoFront, "no-front", false, "dial the CDN directly")
+	flag.StringVar(&options.routeMode, "route", string(xcfg.RouteGlobal),
+		"how much traffic the tunnel carries: global or smart")
+	flag.StringVar(&options.supervisor.Assets, "assets", "",
+		"directory holding geoip.dat and geosite.dat (default: next to the binary)")
+	flag.StringVar(&options.supervisor.DomainStrategy, "route-domain-strategy", "",
+		"router domain strategy: AsIs, IPIfNonMatch or IPOnDemand")
 	flag.IntVar(&options.supervisor.MaxEntries, "max-entries", 0, "cap entry addresses (0 = all reachable)")
 	flag.DurationVar(&options.supervisor.ProbeTimeout, "probe-timeout", 3*time.Second, "entry TCP probe timeout")
 }
@@ -102,6 +109,24 @@ func registerControlFlags(options *cliOptions) {
 	flag.StringVar(&options.pinsPath, "pins", "tunnet-lite-pins.json", "certificate pin store")
 }
 
+// applyRouting validates the routing choice and points xray-core at the rule
+// sets. The lookup path is a process-wide setting, so it has to be established
+// before anything starts.
+func applyRouting(options *cliOptions) error {
+	mode, err := xcfg.ParseRouteMode(options.routeMode)
+	if err != nil {
+		return err
+	}
+	options.supervisor.RouteMode = mode
+
+	dir, err := xcfg.ResolveAssets(options.supervisor.Assets)
+	if err != nil && mode == xcfg.RouteSmart {
+		return fmt.Errorf("smart routing needs the rule sets: %w\n"+
+			"put geoip.dat and geosite.dat in %s, or pass -assets", err, dir)
+	}
+	return nil
+}
+
 // sessionPaths groups everything needed to reach the control plane.
 type sessionPaths struct {
 	identity   string
@@ -124,6 +149,9 @@ type refreshConfig struct {
 }
 
 func execute(ctx context.Context, options cliOptions) error {
+	if err := applyRouting(&options); err != nil {
+		return err
+	}
 	hardening, err := buildHardening(options.dohList, options.useECH, options.pinMode, options.pinsPath)
 	if err != nil {
 		return err

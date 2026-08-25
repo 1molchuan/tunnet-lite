@@ -86,11 +86,20 @@ func TestFrontProxyAddsAnOutboundAndChainsTheDial(t *testing.T) {
 	cfg := build(t, o)
 	obs := outbounds(t, cfg)
 
-	last := obs[len(obs)-1]
-	if last["tag"] != "front-proxy" {
-		t.Fatalf("expected a front-proxy outbound, got %v", last["tag"])
+	var front map[string]any
+	for _, ob := range obs {
+		if ob["tag"] == "front-proxy" {
+			front = ob
+		}
 	}
-	servers := last["settings"].(map[string]any)["servers"].([]any)
+	if front == nil {
+		var tags []string
+		for _, ob := range obs {
+			tags = append(tags, ob["tag"].(string))
+		}
+		t.Fatalf("no front-proxy outbound among %v", tags)
+	}
+	servers := front["settings"].(map[string]any)["servers"].([]any)
 	server := servers[0].(map[string]any)
 	if server["address"] != "198.51.100.1" || server["port"].(float64) != 443 {
 		t.Errorf("front proxy endpoint was not split correctly: %v", server)
