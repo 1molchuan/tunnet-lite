@@ -41,6 +41,11 @@ echo "$TARGETS" | while read -r goos goarch nodeos nodearch; do
         "$GO" build -trimpath -ldflags="-s -w" -o "$dir/bin/$exe" . < /dev/null
     chmod +x "$dir/bin/$exe"
 
+    # The binary is the combined work that links MPL-covered xray-core, so the
+    # licence and the attribution belong with it, not only with the launcher.
+    [ -f LICENSE ] && cp LICENSE "$dir/"
+    [ -f NOTICE ] && cp NOTICE "$dir/"
+
     cat > "$dir/package.json" <<JSON
 {
   "name": "$SCOPE/$name",
@@ -50,7 +55,7 @@ echo "$TARGETS" | while read -r goos goarch nodeos nodearch; do
   "repository": { "type": "git", "url": "git+https://github.com/1molchuan/tunnet-lite.git" },
   "os": ["$nodeos"],
   "cpu": ["$nodearch"],
-  "files": ["bin/"]
+  "files": ["bin/", "NOTICE"]
 }
 JSON
     echo "built $SCOPE/$name ($(wc -c < "$dir/bin/$exe") bytes)"
@@ -78,7 +83,7 @@ cat > "$dir/package.json" <<JSON
   "license": "MIT",
   "repository": { "type": "git", "url": "git+https://github.com/1molchuan/tunnet-lite.git" },
   "bin": { "tunnet-lite": "bin/tunnet-lite.js" },
-  "files": ["bin/"],
+  "files": ["bin/", "NOTICE"],
   "engines": { "node": ">=18" },
   "optionalDependencies": {
 $deps  }
