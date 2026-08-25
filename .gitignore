@@ -5,11 +5,13 @@ nodes.json
 *-state.json
 *-pins.json
 
-# Build output and local artefacts
-tunnet-lite
-tunnet-lite.exe
-access2nodes
-access2nodes.exe
+# Build output and local artefacts. These are anchored to the repository root:
+# an unanchored "tunnet-lite" also matches the npm/tunnet-lite directory, which
+# silently kept the launcher package out of the last commit.
+/tunnet-lite
+/tunnet-lite.exe
+/access2nodes
+/access2nodes.exe
 *.exe
 *.exe~
 *.log
