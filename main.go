@@ -25,6 +25,7 @@ import (
 	"github.com/1molchuan/tunnet-lite/internal/pinning"
 	"github.com/1molchuan/tunnet-lite/internal/resolver"
 	"github.com/1molchuan/tunnet-lite/internal/supervisor"
+	"github.com/1molchuan/tunnet-lite/internal/updater"
 	"github.com/1molchuan/tunnet-lite/internal/xcfg"
 )
 
@@ -39,20 +40,21 @@ func main() {
 }
 
 type cliOptions struct {
-	nodesPath   string
-	identity    string
-	controlURL  string
-	dohList     string
-	pinMode     string
-	pinsPath    string
-	verifyURL   string
-	routeMode   string
-	useECH      bool
-	refresh     bool
-	autoApprove bool
-	interactive bool
-	dump        bool
-	supervisor  supervisor.Options
+	nodesPath    string
+	identity     string
+	controlURL   string
+	dohList      string
+	pinMode      string
+	pinsPath     string
+	verifyURL    string
+	routeMode    string
+	useECH       bool
+	refresh      bool
+	autoApprove  bool
+	interactive  bool
+	dump         bool
+	refreshEvery time.Duration
+	supervisor   supervisor.Options
 }
 
 func parseCLI() cliOptions {
@@ -107,6 +109,9 @@ func registerControlFlags(options *cliOptions) {
 	flag.BoolVar(&options.useECH, "ech", true, "require ECH on the control connection")
 	flag.StringVar(&options.pinMode, "pin-mode", "tofu", "certificate pinning: off, tofu or strict")
 	flag.StringVar(&options.pinsPath, "pins", "tunnet-lite-pins.json", "certificate pin store")
+	flag.DurationVar(&options.refreshEvery, "refresh-interval", 0,
+		"poll for node changes this often and report them; 0 disables. "+
+			"Changes are never applied on their own — the running tunnel keeps its node set until you restart it")
 }
 
 // applyRouting validates the routing choice and points xray-core at the rule
@@ -135,10 +140,11 @@ type sessionPaths struct {
 }
 
 type runConfig struct {
-	supervisor  supervisor.Options
-	interactive bool
-	paths       sessionPaths
-	hardening   control.Hardening
+	supervisor   supervisor.Options
+	interactive  bool
+	paths        sessionPaths
+	hardening    control.Hardening
+	refreshEvery time.Duration
 }
 
 type refreshConfig struct {
@@ -172,7 +178,7 @@ func execute(ctx context.Context, options cliOptions) error {
 	}
 	return run(ctx, inv, runConfig{
 		supervisor: options.supervisor, interactive: options.interactive,
-		paths: paths, hardening: hardening,
+		paths: paths, hardening: hardening, refreshEvery: options.refreshEvery,
 	})
 }
 
@@ -250,19 +256,42 @@ func run(ctx context.Context, inv *inventory.Inventory, config runConfig) error 
 		return err
 	}
 
+	// The session is optional here: an unauthorised identity should not stop
+	// the proxy from serving with the inventory already on disk.
+	session, err := openExistingSession(ctx, config.paths, config.hardening)
+	if err != nil && config.interactive {
+		return err
+	}
+
 	if !config.interactive {
+		startWatching(ctx, session, config.refreshEvery, inv, nil)
 		<-ctx.Done()
 		log.Printf("shutting down")
 		return nil
 	}
 
-	session, err := openExistingSession(ctx, config.paths, config.hardening)
-	if err != nil {
-		return err
-	}
-	err = console.New(eng, inv, config.supervisor, session, os.Stdin, os.Stdout).Run(ctx)
+	panel := console.New(eng, inv, config.supervisor, session, os.Stdin, os.Stdout)
+	startWatching(ctx, session, config.refreshEvery, inv, panel.SetInventory)
+	err = panel.Run(ctx)
 	log.Printf("shutting down")
 	return err
+}
+
+// startWatching polls for node changes in the background. It only reports them:
+// applying a new node set rebuilds the tunnel and drops connections in flight,
+// which is a decision for whoever is using the proxy rather than for a timer.
+func startWatching(ctx context.Context, session *control.Session, every time.Duration,
+	inv *inventory.Inventory, install func(*inventory.Inventory)) {
+	if session == nil || every <= 0 {
+		return
+	}
+	watcher := &updater.Updater{Session: session, Interval: every}
+	if install != nil {
+		watcher.OnUpdate = func(next *inventory.Inventory, _ inventory.Changes) {
+			install(next)
+		}
+	}
+	go watcher.Run(ctx, inv)
 }
 
 func openExistingSession(ctx context.Context, paths sessionPaths, hardening control.Hardening) (*control.Session, error) {

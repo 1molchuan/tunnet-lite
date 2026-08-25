@@ -112,6 +112,7 @@ rebuilds the tunnel.
 | `-port 18080` | SOCKS port |
 | `-route smart` | keep mainland-China destinations local (needs the rule sets) |
 | `-assets <dir>` | where `geoip.dat` and `geosite.dat` live |
+| `-refresh-interval 6h` | watch for node changes and report them (never applies them) |
 | `-doh <urls>` | comma-separated IP-literal DoH endpoints; `off` uses system DNS |
 | `-ech=true` | require ECH on the control connection; failure is fatal |
 | `-pin-mode tofu` | certificate pinning mode: `off`, `tofu`, or `strict` |
@@ -209,6 +210,23 @@ The two responses differ in shape, which matters:
 A sync is therefore a partial update and is merged onto what is already known.
 This is also why the root domain is cached locally: the pool only ever arrives
 with a full access response.
+
+### Keeping up with node changes
+
+Exits appear and disappear, per-host keys rotate and ingress pools are
+reshuffled. Nothing polls by default. `-refresh` fetches once and exits;
+`refresh` in the console updates the node set in memory, and `start` applies it.
+
+`-refresh-interval` watches in the background and reports what moved:
+
+```
+nodes changed — exits removed: google-gemini; address pools changed: 电信接入点
+the running tunnel still uses the previous set; apply it when convenient
+```
+
+It deliberately stops there. Applying a new set rebuilds the tunnel and drops
+every connection in flight, and deciding when that is acceptable belongs to
+whoever is using the proxy rather than to a timer.
 
 ## How entry selection works
 

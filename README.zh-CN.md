@@ -100,6 +100,7 @@ curl --proxy socks5h://127.0.0.1:18080 https://api.ipify.org
 | `-port 18080` | SOCKS 端口 |
 | `-route smart` | 中国大陆目标直连（需要规则集） |
 | `-assets <目录>` | `geoip.dat` 和 `geosite.dat` 所在目录 |
+| `-refresh-interval 6h` | 后台监视节点变化并提示（永不自动应用） |
 | `-doh <地址>` | 逗号分隔的纯 IP DoH 上游；`off` 表示用系统 DNS |
 | `-ech=true` | 控制面连接强制要求 ECH，失败即中止 |
 | `-pin-mode tofu` | 证书固定模式：`off`、`tofu`、`strict` |
@@ -162,6 +163,19 @@ sh tools/fetch-rules.sh assets
 | `network.root_domains` | 有 | **无** |
 
 所以 sync 是**增量更新**，会合并到已知内容之上。这也是根域名要在本地缓存的原因：根域名池只随完整的 access 响应下发一次。
+
+### 跟上节点变化
+
+出口会上下线，每个出口的密钥会轮换，入口 IP 池会重排。**默认不做任何轮询。** `-refresh` 拉取一次后退出；控制台里的 `refresh` 更新内存中的节点集，`start` 才应用。
+
+`-refresh-interval` 会在后台监视并报告变化：
+
+```
+nodes changed — exits removed: google-gemini; address pools changed: 电信接入点
+the running tunnel still uses the previous set; apply it when convenient
+```
+
+**它到此为止。** 应用新节点集意味着重建隧道、掐断所有进行中的连接；什么时候可以承受这个代价，该由使用代理的人决定，而不是由一个定时器决定。
 
 ## 入口选择怎么工作
 

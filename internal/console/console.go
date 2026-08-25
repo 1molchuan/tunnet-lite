@@ -13,6 +13,7 @@ import (
 	"io"
 	"strconv"
 	"strings"
+	"sync"
 	"text/tabwriter"
 	"time"
 
@@ -28,6 +29,9 @@ type Console struct {
 	engine  *engine.Engine
 	session *control.Session // optional; nil disables "refresh"
 
+	// inv is replaced by the background updater, so every read goes through
+	// inventory() rather than touching the field.
+	mu   sync.Mutex
 	inv  *inventory.Inventory
 	opts supervisor.Options
 
@@ -42,6 +46,21 @@ func New(eng *engine.Engine, inv *inventory.Inventory, opts supervisor.Options,
 		in:  bufio.NewScanner(in),
 		out: bufio.NewWriter(out),
 	}
+}
+
+// inventory returns the current node set.
+func (c *Console) inventory() *inventory.Inventory {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	return c.inv
+}
+
+// SetInventory installs a newly fetched node set. It does not disturb the
+// running tunnel: the operator applies it with "start" when that is convenient.
+func (c *Console) SetInventory(inv *inventory.Inventory) {
+	c.mu.Lock()
+	c.inv = inv
+	c.mu.Unlock()
 }
 
 type command struct {
@@ -169,7 +188,7 @@ func (c *Console) showStatus() {
 
 func cmdExits(_ context.Context, c *Console, _ string) error {
 	w := tabwriter.NewWriter(c.out, 0, 0, 2, ' ', 0)
-	for i, h := range c.inv.Hosts {
+	for i, h := range c.inventory().Hosts {
 		state := "online"
 		if !h.Online {
 			state = "offline"
@@ -181,7 +200,7 @@ func cmdExits(_ context.Context, c *Console, _ string) error {
 
 func cmdEntries(_ context.Context, c *Console, _ string) error {
 	w := tabwriter.NewWriter(c.out, 0, 0, 2, ' ', 0)
-	for i, g := range c.inv.EntryGroups {
+	for i, g := range c.inventory().EntryGroups {
 		front := "no front proxy"
 		if g.FrontProxy != nil {
 			front = g.FrontProxy.Endpoint
@@ -197,12 +216,12 @@ func cmdSetExit(_ context.Context, c *Console, arg string) error {
 		return errors.New("usage: exit <slug|#>")
 	}
 	if n, err := strconv.Atoi(arg); err == nil {
-		if n < 1 || n > len(c.inv.Hosts) {
+		if n < 1 || n > len(c.inventory().Hosts) {
 			return fmt.Errorf("no exit number %d; try \"exits\"", n)
 		}
-		arg = c.inv.Hosts[n-1].Slug
+		arg = c.inventory().Hosts[n-1].Slug
 	}
-	host, err := c.inv.SelectHost(arg)
+	host, err := c.inventory().SelectHost(arg)
 	if err != nil {
 		return err
 	}
@@ -216,12 +235,12 @@ func cmdSetEntry(_ context.Context, c *Console, arg string) error {
 		return errors.New("usage: entry <name|#>")
 	}
 	if n, err := strconv.Atoi(arg); err == nil {
-		if n < 1 || n > len(c.inv.EntryGroups) {
+		if n < 1 || n > len(c.inventory().EntryGroups) {
 			return fmt.Errorf("no entry number %d; try \"entries\"", n)
 		}
-		arg = c.inv.EntryGroups[n-1].Name
+		arg = c.inventory().EntryGroups[n-1].Name
 	}
-	group, err := c.inv.SelectGroup(arg)
+	group, err := c.inventory().SelectGroup(arg)
 	if err != nil {
 		return err
 	}
@@ -275,7 +294,7 @@ func cmdRoute(_ context.Context, c *Console, arg string) error {
 func cmdStart(ctx context.Context, c *Console, _ string) error {
 	c.printf("probing entry pool…\n")
 	c.out.Flush()
-	if _, err := supervisor.Start(ctx, c.engine, c.inv, c.opts); err != nil {
+	if _, err := supervisor.Start(ctx, c.engine, c.inventory(), c.opts); err != nil {
 		return err
 	}
 	c.showStatus()
@@ -308,7 +327,7 @@ func cmdRefresh(ctx context.Context, c *Console, _ string) error {
 		return err
 	}
 
-	c.inv = inv
+	c.SetInventory(inv)
 	c.printf("updated: %d exits, %d ingresses, %d root domains\n",
 		len(inv.Hosts), len(inv.EntryGroups), len(inv.RootDomains))
 	return nil
