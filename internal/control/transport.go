@@ -10,7 +10,10 @@ import (
 	"net/http"
 	"net/url"
 	"strings"
+	"sync"
 	"time"
+
+	"golang.org/x/net/http2"
 
 	"github.com/1molchuan/tunnet-lite/internal/pinning"
 )
@@ -75,11 +78,98 @@ func NewHardenedClient(ctx context.Context, endpoint string, h Hardening) (*http
 		ForceAttemptHTTP2:   true,
 		TLSHandshakeTimeout: 15 * time.Second,
 	}
+	dial := (&net.Dialer{Timeout: 10 * time.Second}).DialContext
 	if h.Resolver != nil {
-		transport.DialContext = dialViaResolver(h.Resolver)
+		dial = dialViaResolver(h.Resolver)
+	}
+	transport.DialContext = dial
+
+	if len(tlsConfig.EncryptedClientHelloConfigList) > 0 {
+		if err := useECHDialer(transport, tlsConfig, dial); err != nil {
+			return nil, err
+		}
 	}
 
 	return &http.Client{Timeout: 30 * time.Second, Transport: transport}, nil
+}
+
+// useECHDialer takes over the TLS handshake so a rejected ECH attempt can be
+// retried.
+//
+// ECH configurations rotate. A client holding a stale one is refused and handed
+// the current list in the same error; recovering from that is part of using
+// ECH, not an optional extra. Without it the client simply stops working
+// whenever the operator rotates keys.
+func useECHDialer(transport *http.Transport, tlsConfig *tls.Config, dial dialFunc) error {
+	tlsConfig.NextProtos = []string{"h2", "http/1.1"}
+	d := &echDialer{tlsConfig: tlsConfig, dial: dial, config: tlsConfig.EncryptedClientHelloConfigList}
+
+	transport.DialContext = nil
+	transport.DialTLSContext = d.dialTLS
+	// A custom DialTLSContext suppresses the automatic HTTP/2 upgrade, so
+	// register it explicitly; otherwise negotiating h2 leaves the connection
+	// unusable.
+	return http2.ConfigureTransport(transport)
+}
+
+type dialFunc func(ctx context.Context, network, addr string) (net.Conn, error)
+
+type echDialer struct {
+	tlsConfig *tls.Config
+	dial      dialFunc
+
+	mu     sync.Mutex
+	config []byte
+}
+
+func (d *echDialer) current() []byte {
+	d.mu.Lock()
+	defer d.mu.Unlock()
+	return d.config
+}
+
+func (d *echDialer) adopt(config []byte) {
+	d.mu.Lock()
+	defer d.mu.Unlock()
+	d.config = config
+}
+
+func (d *echDialer) dialTLS(ctx context.Context, network, addr string) (net.Conn, error) {
+	conn, retry, err := d.attempt(ctx, network, addr, d.current())
+	if err == nil {
+		return conn, nil
+	}
+	if retry == nil {
+		return nil, err
+	}
+
+	// The server supplied its current configuration; adopt it and try once
+	// more. A second rejection is a real failure, not a rotation.
+	d.adopt(retry)
+	conn, _, err = d.attempt(ctx, network, addr, retry)
+	return conn, err
+}
+
+// attempt returns the server's retry configuration when ECH was rejected
+// because the offered one was stale.
+func (d *echDialer) attempt(ctx context.Context, network, addr string, echConfig []byte) (net.Conn, []byte, error) {
+	raw, err := d.dial(ctx, network, addr)
+	if err != nil {
+		return nil, nil, err
+	}
+
+	cfg := d.tlsConfig.Clone()
+	cfg.EncryptedClientHelloConfigList = echConfig
+	conn := tls.Client(raw, cfg)
+	if err := conn.HandshakeContext(ctx); err != nil {
+		raw.Close()
+		var rejected *tls.ECHRejectionError
+		if errors.As(err, &rejected) && len(rejected.RetryConfigList) > 0 {
+			return nil, rejected.RetryConfigList, err
+		}
+		return nil, nil, err
+	}
+	return conn, nil, nil
 }
 
 func configureECH(ctx context.Context, host string, h Hardening, tlsConfig *tls.Config) error {
