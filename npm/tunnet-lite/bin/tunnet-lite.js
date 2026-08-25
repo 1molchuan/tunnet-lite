@@ -16,6 +16,7 @@ const PACKAGES = {
   "linux arm64": "@1molchuan/tunnet-lite-linux-arm64",
   "linux x64": "@1molchuan/tunnet-lite-linux-x64",
   "win32 arm64": "@1molchuan/tunnet-lite-win32-arm64",
+  "win32 ia32": "@1molchuan/tunnet-lite-win32-ia32",
   "win32 x64": "@1molchuan/tunnet-lite-win32-x64",
 };
 

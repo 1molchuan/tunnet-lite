@@ -138,23 +138,29 @@ func applyPaths(options *cliOptions) error {
 		return fmt.Errorf("prepare %s: %w", resolved.Dir, err)
 	}
 
-	setDefault(&options.nodesPath, resolved.Nodes)
-	setDefault(&options.identity, resolved.Identity)
-	setDefault(&options.pinsPath, resolved.Pins)
-	setDefault(&options.supervisor.StatePath, resolved.State)
+	// Report the legacy location only if a default actually resolved to it.
+	// Explicit flags are the caller's business, and warning about defaults
+	// that were overridden anyway is just noise.
+	adopted := setDefault(&options.nodesPath, resolved.Nodes)
+	adopted = setDefault(&options.identity, resolved.Identity) || adopted
+	adopted = setDefault(&options.pinsPath, resolved.Pins) || adopted
+	adopted = setDefault(&options.supervisor.StatePath, resolved.State) || adopted
 	setDefault(&options.supervisor.Assets, resolved.Assets)
 
-	if resolved.UsingLegacy() {
+	if adopted && resolved.UsingLegacy() {
 		log.Printf("using state from the working directory; move it into %s to run from anywhere",
 			resolved.Dir)
 	}
 	return nil
 }
 
-func setDefault(field *string, value string) {
-	if *field == "" {
-		*field = value
+// setDefault fills an unset field and reports whether it did.
+func setDefault(field *string, value string) bool {
+	if *field != "" {
+		return false
 	}
+	*field = value
+	return true
 }
 
 // fetchRules downloads the rule sets. It is a subcommand rather than a script

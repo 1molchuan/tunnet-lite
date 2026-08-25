@@ -29,6 +29,8 @@ npm install -g tunnet-lite
 
 不想经过 npm 的话，每个 [release](https://github.com/1molchuan/tunnet-lite/releases) 都附带预编译二进制。
 
+覆盖 macOS（arm64、x64）、Linux（arm64、x64）、Windows（x64、arm64、32 位 x86）。32 位 Windows 之所以在列，是因为它**实测能跑**——是真的运行过、建起隧道并拿到出口 IP，不是"编译通过"就算数。但在有得选的情况下，用 64 位那个。
+
 ## 首次运行
 
 ```bash

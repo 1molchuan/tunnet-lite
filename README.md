@@ -39,6 +39,11 @@ launcher says which package is missing if that happens.
 Prebuilt binaries are attached to each [release](https://github.com/1molchuan/tunnet-lite/releases)
 if you would rather not involve npm.
 
+Builds exist for macOS (arm64, x64), Linux (arm64, x64) and Windows (x64, arm64,
+32-bit x86). The 32-bit Windows build is there because it works — it was checked
+by running it, not by observing that it compiled — but everything else being
+equal the 64-bit build is the one to use.
+
 ## First run
 
 ```bash
