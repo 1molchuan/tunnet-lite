@@ -41,14 +41,7 @@ if you would rather not involve npm.
 
 ## First run
 
-`tunnet-lite` keeps its state in the **current working directory**: the node
-inventory, the control-plane identity, the recorded certificate pins and the
-cached root domain all land there as files. Pick a directory and stay in it,
-otherwise the next run starts from nothing and asks you to authorise again.
-
 ```bash
-mkdir -p ~/.tunnet-lite && cd ~/.tunnet-lite
-
 tunnet-lite -refresh
 ```
 
@@ -56,19 +49,29 @@ The first `-refresh` creates an identity and prints a verification URL. Open it,
 approve the client, then run `-refresh` once more to collect the node directory.
 Later runs refresh silently.
 
-Four files appear, and all four are credentials — treat them like an SSH key:
+State goes to the per-user configuration directory, so the command behaves the
+same wherever you run it — `~/.config/tunnet-lite` on Linux,
+`~/Library/Application Support/tunnet-lite` on macOS, `%AppData%\tunnet-lite` on
+Windows. Override it with `-dir`, or with `TUNNET_LITE_HOME` to keep separate
+identities side by side.
+
+Four files appear there, and all four are credentials — treat them like an SSH
+key:
 
 | File | What it holds |
 |---|---|
 | `nodes.json` | the node directory, including per-host encryption keys |
-| `tunnet-lite-identity.json` | the account id and its signing key |
-| `tunnet-lite-pins.json` | the certificate pins recorded on first connection |
-| `tunnet-lite-state.json` | the cached root domain |
+| `identity.json` | the account id and its signing key |
+| `pins.json` | the certificate pins recorded on first connection |
+| `state.json` | the cached root domain |
+
+Versions before 0.1.2 wrote these into the working directory. Those files are
+still picked up when they are there, and the program says so on startup; move
+them into the directory above to run from anywhere.
 
 ## Everyday use
 
 ```bash
-cd ~/.tunnet-lite
 tunnet-lite -console
 ```
 
@@ -126,10 +129,11 @@ By default everything goes through the tunnel. To keep mainland-China
 destinations local, fetch the rule sets once and switch mode:
 
 ```bash
-tunnet-lite -fetch-rules -assets ~/.tunnet-lite/assets
-tunnet-lite -route smart -assets ~/.tunnet-lite/assets
+tunnet-lite -fetch-rules
+tunnet-lite -route smart
 ```
 
+They land next to the rest of the state, so neither command needs a path.
 `-fetch-rules` verifies each file against its published digest before installing
 it, and skips files that are already current. See [Routing](#routing) for what
 the modes do.
@@ -148,6 +152,7 @@ the modes do.
 | `-no-front` | dial the CDN directly, skipping the front proxy |
 | `-root <domain>` | pin a root domain instead of using the cached choice |
 | `-port 18080` | SOCKS port |
+| `-dir <path>` | where state is kept (default: the per-user config directory) |
 | `-refresh-interval 6h` | watch for node changes and report them (never applies them) |
 | `-dump-config` | print the rendered Xray config and exit |
 | `-doh <urls>` | comma-separated IP-literal DoH endpoints; `off` uses system DNS |

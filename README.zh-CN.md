@@ -31,29 +31,28 @@ npm install -g tunnet-lite
 
 ## 首次运行
 
-`tunnet-lite` 把状态存在**当前工作目录**：节点清单、控制面身份、记录的证书 pin、缓存的根域名，都以文件形式落在那里。**选定一个目录并固定用它**，否则下次运行等于从零开始，还得重新授权一遍。
-
 ```bash
-mkdir -p ~/.tunnet-lite && cd ~/.tunnet-lite
-
 tunnet-lite -refresh
 ```
 
 第一次 `-refresh` 会创建身份并打印一个验证链接。浏览器打开、批准，然后再跑一次 `-refresh` 取回节点目录。之后的刷新都是静默的。
 
-会生成四个文件，**四个都是凭据**，请当作 SSH 私钥对待：
+**状态存在按用户的配置目录里，所以在哪个目录运行都一样**——Linux 是 `~/.config/tunnet-lite`，macOS 是 `~/Library/Application Support/tunnet-lite`，Windows 是 `%AppData%\tunnet-lite`。用 `-dir` 可以指定别处，用 `TUNNET_LITE_HOME` 可以并存多个身份。
+
+那里会生成四个文件，**四个都是凭据**，请当作 SSH 私钥对待：
 
 | 文件 | 内容 |
 |---|---|
 | `nodes.json` | 节点目录，含每个出口的加密密钥 |
-| `tunnet-lite-identity.json` | 账号 ID 及其签名私钥 |
-| `tunnet-lite-pins.json` | 首次连接时记录的证书 pin |
-| `tunnet-lite-state.json` | 缓存的根域名 |
+| `identity.json` | 账号 ID 及其签名私钥 |
+| `pins.json` | 首次连接时记录的证书 pin |
+| `state.json` | 缓存的根域名 |
+
+0.1.2 之前的版本把这些写在工作目录里。那些文件仍然会被识别并继续使用，程序启动时会提示；把它们移进上面那个目录就能在任何位置运行。
 
 ## 日常使用
 
 ```bash
-cd ~/.tunnet-lite
 tunnet-lite -console
 ```
 
@@ -105,11 +104,11 @@ curl --proxy socks5h://127.0.0.1:18080 https://api.ipify.org
 默认全部走隧道。想让中国大陆目标直连，取一次规则集再切模式：
 
 ```bash
-tunnet-lite -fetch-rules -assets ~/.tunnet-lite/assets
-tunnet-lite -route smart -assets ~/.tunnet-lite/assets
+tunnet-lite -fetch-rules
+tunnet-lite -route smart
 ```
 
-`-fetch-rules` 会先用官方发布的摘要校验再安装，已是最新的文件会跳过。两种模式的区别见下文[分流](#分流)一节。
+规则集会放在状态目录里，所以两条命令都不用写路径。`-fetch-rules` 会先用官方发布的摘要校验再安装，已是最新的文件会跳过。两种模式的区别见下文[分流](#分流)一节。
 
 ### 常用参数
 
@@ -125,6 +124,7 @@ tunnet-lite -route smart -assets ~/.tunnet-lite/assets
 | `-no-front` | 直连 CDN，跳过前置代理 |
 | `-root <域名>` | 钉住某个根域名，不用缓存的选择 |
 | `-port 18080` | SOCKS 端口 |
+| `-dir <路径>` | 状态存放位置（默认：按用户的配置目录） |
 | `-refresh-interval 6h` | 后台监视节点变化并提示（永不自动应用） |
 | `-dump-config` | 打印生成的 Xray 配置后退出 |
 | `-doh <地址>` | 逗号分隔的纯 IP DoH 上游；`off` 表示用系统 DNS |

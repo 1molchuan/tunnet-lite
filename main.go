@@ -22,6 +22,7 @@ import (
 	"github.com/1molchuan/tunnet-lite/internal/control"
 	"github.com/1molchuan/tunnet-lite/internal/engine"
 	"github.com/1molchuan/tunnet-lite/internal/inventory"
+	"github.com/1molchuan/tunnet-lite/internal/paths"
 	"github.com/1molchuan/tunnet-lite/internal/pinning"
 	"github.com/1molchuan/tunnet-lite/internal/resolver"
 	"github.com/1molchuan/tunnet-lite/internal/rules"
@@ -42,6 +43,7 @@ func main() {
 
 type cliOptions struct {
 	nodesPath    string
+	homeDir      string
 	identity     string
 	controlURL   string
 	dohList      string
@@ -73,7 +75,9 @@ func parseCLI() cliOptions {
 }
 
 func registerProxyFlags(options *cliOptions) {
-	flag.StringVar(&options.nodesPath, "nodes", "nodes.json", "node inventory file")
+	flag.StringVar(&options.homeDir, "dir", "",
+		"where to keep state (default: the per-user config directory, or $"+paths.HomeEnv+")")
+	flag.StringVar(&options.nodesPath, "nodes", "", "node inventory file (default: <dir>/nodes.json)")
 	flag.StringVar(&options.supervisor.Listen, "listen", "127.0.0.1", "SOCKS bind address")
 	flag.IntVar(&options.supervisor.Port, "port", 18080, "SOCKS port")
 	flag.BoolVar(&options.supervisor.UDP, "udp", false, "enable SOCKS UDP associate (nodes reject mux)")
@@ -84,7 +88,7 @@ func registerProxyFlags(options *cliOptions) {
 	flag.StringVar(&options.routeMode, "route", string(xcfg.RouteGlobal),
 		"how much traffic the tunnel carries: global or smart")
 	flag.StringVar(&options.supervisor.Assets, "assets", "",
-		"directory holding geoip.dat and geosite.dat (default: next to the binary)")
+		"directory holding geoip.dat and geosite.dat (default: <dir>/assets)")
 	flag.BoolVar(&options.fetchRules, "fetch-rules", false,
 		"download the rule sets smart routing needs into -assets, then exit")
 	flag.StringVar(&options.supervisor.DomainStrategy, "route-domain-strategy", "",
@@ -101,14 +105,14 @@ func registerWireFlags(options *cliOptions) {
 	flag.StringVar(&options.supervisor.RTT, "enc-rtt", xcfg.DefaultRTT, "VLESS Encryption handshake")
 	flag.StringVar(&options.supervisor.Padding, "enc-padding", xcfg.DefaultPadding, "VLESS Encryption padding")
 	flag.StringVar(&options.supervisor.Flow, "flow", xcfg.DefaultFlow, "VLESS flow; use \"none\" to disable")
-	flag.StringVar(&options.supervisor.StatePath, "state", "tunnet-lite-state.json", "persisted choices")
+	flag.StringVar(&options.supervisor.StatePath, "state", "", "persisted choices (default: <dir>/state.json)")
 	flag.StringVar(&options.supervisor.LogLevel, "log-level", "warning", "xray log level")
 	flag.BoolVar(&options.interactive, "console", false, "open the interactive console")
 	flag.BoolVar(&options.dump, "dump-config", false, "print the rendered config and exit")
 }
 
 func registerControlFlags(options *cliOptions) {
-	flag.StringVar(&options.identity, "identity", "tunnet-lite-identity.json", "control-plane identity path")
+	flag.StringVar(&options.identity, "identity", "", "control-plane identity path (default: <dir>/identity.json)")
 	flag.BoolVar(&options.refresh, "refresh", false, "fetch the node inventory, then exit")
 	flag.BoolVar(&options.autoApprove, "auto-approve", false, "approve a pending authorisation")
 	flag.StringVar(&options.verifyURL, "verify-url", "", "override the verification page URL")
@@ -116,19 +120,47 @@ func registerControlFlags(options *cliOptions) {
 	flag.StringVar(&options.dohList, "doh", "", "IP-literal DoH URLs; \"off\" uses system DNS")
 	flag.BoolVar(&options.useECH, "ech", true, "require ECH on the control connection")
 	flag.StringVar(&options.pinMode, "pin-mode", "tofu", "certificate pinning: off, tofu or strict")
-	flag.StringVar(&options.pinsPath, "pins", "tunnet-lite-pins.json", "certificate pin store")
+	flag.StringVar(&options.pinsPath, "pins", "", "certificate pin store (default: <dir>/pins.json)")
 	flag.DurationVar(&options.refreshEvery, "refresh-interval", 0,
 		"poll for node changes this often and report them; 0 disables. "+
 			"Changes are never applied on their own — the running tunnel keeps its node set until you restart it")
+}
+
+// applyPaths fills in every location the user did not set explicitly. Doing it
+// once here keeps "where does this live" in one place rather than spread across
+// flag defaults, which is what made the working directory the implicit answer.
+func applyPaths(options *cliOptions) error {
+	resolved, err := paths.Resolve(options.homeDir)
+	if err != nil {
+		return err
+	}
+	if err := resolved.EnsureDir(); err != nil {
+		return fmt.Errorf("prepare %s: %w", resolved.Dir, err)
+	}
+
+	setDefault(&options.nodesPath, resolved.Nodes)
+	setDefault(&options.identity, resolved.Identity)
+	setDefault(&options.pinsPath, resolved.Pins)
+	setDefault(&options.supervisor.StatePath, resolved.State)
+	setDefault(&options.supervisor.Assets, resolved.Assets)
+
+	if resolved.UsingLegacy() {
+		log.Printf("using state from the working directory; move it into %s to run from anywhere",
+			resolved.Dir)
+	}
+	return nil
+}
+
+func setDefault(field *string, value string) {
+	if *field == "" {
+		*field = value
+	}
 }
 
 // fetchRules downloads the rule sets. It is a subcommand rather than a script
 // because an npm install has no repository to run a script from, and pointing
 // people at raw download commands would leave the digest check to them.
 func fetchRules(ctx context.Context, dir string) error {
-	if dir == "" {
-		dir = "assets"
-	}
 	log.Printf("fetching rule sets into %s", dir)
 	if err := rules.NewFetcher().Fetch(ctx, dir, log.Printf); err != nil {
 		return err
@@ -178,6 +210,9 @@ type refreshConfig struct {
 }
 
 func execute(ctx context.Context, options cliOptions) error {
+	if err := applyPaths(&options); err != nil {
+		return err
+	}
 	if options.fetchRules {
 		return fetchRules(ctx, options.supervisor.Assets)
 	}
