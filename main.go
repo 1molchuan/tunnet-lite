@@ -24,6 +24,7 @@ import (
 	"github.com/1molchuan/tunnet-lite/internal/inventory"
 	"github.com/1molchuan/tunnet-lite/internal/pinning"
 	"github.com/1molchuan/tunnet-lite/internal/resolver"
+	"github.com/1molchuan/tunnet-lite/internal/rules"
 	"github.com/1molchuan/tunnet-lite/internal/supervisor"
 	"github.com/1molchuan/tunnet-lite/internal/updater"
 	"github.com/1molchuan/tunnet-lite/internal/xcfg"
@@ -48,6 +49,7 @@ type cliOptions struct {
 	pinsPath     string
 	verifyURL    string
 	routeMode    string
+	fetchRules   bool
 	useECH       bool
 	refresh      bool
 	autoApprove  bool
@@ -83,6 +85,8 @@ func registerProxyFlags(options *cliOptions) {
 		"how much traffic the tunnel carries: global or smart")
 	flag.StringVar(&options.supervisor.Assets, "assets", "",
 		"directory holding geoip.dat and geosite.dat (default: next to the binary)")
+	flag.BoolVar(&options.fetchRules, "fetch-rules", false,
+		"download the rule sets smart routing needs into -assets, then exit")
 	flag.StringVar(&options.supervisor.DomainStrategy, "route-domain-strategy", "",
 		"router domain strategy: AsIs, IPIfNonMatch or IPOnDemand")
 	flag.IntVar(&options.supervisor.MaxEntries, "max-entries", 0, "cap entry addresses (0 = all reachable)")
@@ -116,6 +120,21 @@ func registerControlFlags(options *cliOptions) {
 	flag.DurationVar(&options.refreshEvery, "refresh-interval", 0,
 		"poll for node changes this often and report them; 0 disables. "+
 			"Changes are never applied on their own — the running tunnel keeps its node set until you restart it")
+}
+
+// fetchRules downloads the rule sets. It is a subcommand rather than a script
+// because an npm install has no repository to run a script from, and pointing
+// people at raw download commands would leave the digest check to them.
+func fetchRules(ctx context.Context, dir string) error {
+	if dir == "" {
+		dir = "assets"
+	}
+	log.Printf("fetching rule sets into %s", dir)
+	if err := rules.NewFetcher().Fetch(ctx, dir, log.Printf); err != nil {
+		return err
+	}
+	log.Printf("done; use -route smart -assets %s", dir)
+	return nil
 }
 
 // applyRouting validates the routing choice and points xray-core at the rule
@@ -159,6 +178,9 @@ type refreshConfig struct {
 }
 
 func execute(ctx context.Context, options cliOptions) error {
+	if options.fetchRules {
+		return fetchRules(ctx, options.supervisor.Assets)
+	}
 	if err := applyRouting(&options); err != nil {
 		return err
 	}

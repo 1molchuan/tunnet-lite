@@ -26,43 +26,50 @@ from stdin, so the binary works the same over SSH as it does locally.
 
 ```bash
 npm install -g tunnet-lite
+```
+
+The program is a Go binary, not JavaScript; npm is only how it reaches a machine
+and gets onto the path. The binary lives in a per-platform package selected
+through npm's `os` and `cpu` fields, so an install fetches one ~12 MB download
+rather than all six builds. Those packages are optional dependencies precisely
+so the five that do not match the host are skipped rather than failing the
+install — which also means `--omit=optional` leaves nothing to run, and the
+launcher says which package is missing if that happens.
+
+Prebuilt binaries are attached to each [release](https://github.com/1molchuan/tunnet-lite/releases)
+if you would rather not involve npm.
+
+## First run
+
+`tunnet-lite` keeps its state in the **current working directory**: the node
+inventory, the control-plane identity, the recorded certificate pins and the
+cached root domain all land there as files. Pick a directory and stay in it,
+otherwise the next run starts from nothing and asks you to authorise again.
+
+```bash
+mkdir -p ~/.tunnet-lite && cd ~/.tunnet-lite
+
 tunnet-lite -refresh
+```
+
+The first `-refresh` creates an identity and prints a verification URL. Open it,
+approve the client, then run `-refresh` once more to collect the node directory.
+Later runs refresh silently.
+
+Four files appear, and all four are credentials — treat them like an SSH key:
+
+| File | What it holds |
+|---|---|
+| `nodes.json` | the node directory, including per-host encryption keys |
+| `tunnet-lite-identity.json` | the account id and its signing key |
+| `tunnet-lite-pins.json` | the certificate pins recorded on first connection |
+| `tunnet-lite-state.json` | the cached root domain |
+
+## Everyday use
+
+```bash
+cd ~/.tunnet-lite
 tunnet-lite -console
-```
-
-The program is a Go binary, not JavaScript; npm is used only as a way to get it
-onto a machine and put `tunnet-lite` on the path. The binary lives in a
-per-platform package selected through npm's `os` and `cpu` fields, so installing
-fetches one ~12 MB download rather than all six builds. Those packages are
-optional dependencies precisely so the five that do not match the host are
-skipped rather than failing the install — which also means `--omit=optional`
-leaves nothing to run, and the launcher says so plainly if that happens.
-
-Prebuilt binaries are also attached to each GitHub release if you would rather
-not involve npm at all.
-
-## Building from source
-
-`xray-core` is pinned through a `replace` to a sibling checkout, and two fixes
-in `patches/` are required for the operator front proxy and for entry failover.
-Set that up once:
-
-```bash
-git clone https://github.com/XTLS/Xray-core.git ../xray-tunnet
-git -C ../xray-tunnet checkout f02a35786124a6ad046727f2408e32317cc19a41
-git -C ../xray-tunnet apply "$PWD/patches/xray-core-http-outbound.patch"
-```
-
-Then:
-
-```bash
-go build -o tunnet-lite ./
-
-# One-time: create an identity and fetch the node directory.
-# The first run prints a verification URL; approve it, then run again.
-./tunnet-lite -refresh
-
-./tunnet-lite -console
 ```
 
 ```
@@ -77,16 +84,30 @@ listening    socks5://127.0.0.1:18080 (tcp only)
 exit         sin-01 — Singapore
 ```
 
+| Command | Effect |
+|---|---|
+| `status` | show what is running |
+| `exits` | list exit nodes |
+| `entries` | list operator ingresses |
+| `exit <slug\|#>` | select the exit node |
+| `entry <name\|#>` | select the operator ingress |
+| `route global\|smart` | choose how much traffic the tunnel carries |
+| `udp on\|off` | toggle SOCKS UDP associate |
+| `direct on\|off` | bypass the front proxy |
+| `start` | apply the current selection |
+| `stop` | stop the proxy |
+| `refresh` | fetch a fresh node directory |
+| `quit` | leave; the proxy stops with it |
+
+Selections do not take effect until `start`, which re-probes the entry pool and
+rebuilds the tunnel.
+
 Without `-console` the binary starts the proxy and serves until interrupted,
 which is what you want under a service manager:
 
 ```bash
-./tunnet-lite -host tyo-01 -entry-group 电信
+tunnet-lite -host tyo-01 -entry-group 电信
 ```
-
-`nodes.json`, `tunnet-lite-identity.json` and `tunnet-lite-pins.json` carry your
-account credential, signing key and pinned certificates. All three are in
-`.gitignore` and must stay out of version control.
 
 ### Pointing traffic at it
 
@@ -99,43 +120,53 @@ Plain `socks5` resolves locally over UDP, which these nodes do not carry (see
 below), so the lookup leaks outside the tunnel. In Firefox the equivalent switch
 is `network.proxy.socks_remote_dns`.
 
-### Console commands
+### Splitting traffic
 
-| Command | Effect |
-|---|---|
-| `status` | show what is running |
-| `exits` | list exit nodes |
-| `entries` | list operator ingresses |
-| `exit <slug\|#>` | select the exit node |
-| `entry <name\|#>` | select the operator ingress |
-| `udp on\|off` | toggle SOCKS UDP associate |
-| `direct on\|off` | bypass the front proxy |
-| `route global\|smart` | choose how much traffic the tunnel carries |
-| `start` | apply the current selection |
-| `stop` | stop the proxy |
-| `refresh` | fetch a fresh node directory |
-| `quit` | leave; the proxy stops with it |
+By default everything goes through the tunnel. To keep mainland-China
+destinations local, fetch the rule sets once and switch mode:
 
-Selections do not take effect until `start`, which re-probes the entry pool and
-rebuilds the tunnel.
+```bash
+tunnet-lite -fetch-rules -assets ~/.tunnet-lite/assets
+tunnet-lite -route smart -assets ~/.tunnet-lite/assets
+```
+
+`-fetch-rules` verifies each file against its published digest before installing
+it, and skips files that are already current. See [Routing](#routing) for what
+the modes do.
+
+### Flags
 
 | Flag | Meaning |
 |---|---|
 | `-console` | interactive console instead of just serving |
 | `-refresh` | fetch the directory from the control plane, then exit |
+| `-fetch-rules` | download the routing rule sets, then exit |
 | `-host tyo-01` | pick the exit slug (default: first online host) |
 | `-entry-group 电信` | pick the operator ingress by name or substring |
-| `-no-front` | dial the CDN directly, skipping the front proxy |
-| `-root <domain>` | pin a root domain instead of using the cached choice |
-| `-dump-config` | print the rendered Xray config and exit |
-| `-port 18080` | SOCKS port |
 | `-route smart` | keep mainland-China destinations local (needs the rule sets) |
 | `-assets <dir>` | where `geoip.dat` and `geosite.dat` live |
+| `-no-front` | dial the CDN directly, skipping the front proxy |
+| `-root <domain>` | pin a root domain instead of using the cached choice |
+| `-port 18080` | SOCKS port |
 | `-refresh-interval 6h` | watch for node changes and report them (never applies them) |
+| `-dump-config` | print the rendered Xray config and exit |
 | `-doh <urls>` | comma-separated IP-literal DoH endpoints; `off` uses system DNS |
 | `-ech=true` | require ECH on the control connection; failure is fatal |
 | `-pin-mode tofu` | certificate pinning mode: `off`, `tofu`, or `strict` |
 | `-pins <path>` | pin store path (default: `tunnet-lite-pins.json`) |
+
+## Building from source
+
+`xray-core` is pinned through a `replace` to a sibling checkout, and the CONNECT
+fix in `patches/` is required for the operator front proxy to work at all:
+
+```bash
+git clone https://github.com/XTLS/Xray-core.git ../xray-tunnet
+git -C ../xray-tunnet checkout f02a35786124a6ad046727f2408e32317cc19a41
+git -C ../xray-tunnet apply "$PWD/patches/xray-core-http-outbound.patch"
+
+go build -o tunnet-lite ./
+```
 
 ## Routing
 

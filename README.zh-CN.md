@@ -21,36 +21,40 @@ SOCKS 127.0.0.1:18080
 
 ```bash
 npm install -g tunnet-lite
+```
+
+程序本身是 Go 二进制而不是 JavaScript；用 npm 只是为了把它装到机器上并进 PATH。二进制放在按平台拆分的包里，由 npm 的 `os` / `cpu` 字段选中，所以安装只会下载**一个约 12 MB** 的包，而不是六个平台的构建。
+
+这些平台包被声明为 `optionalDependencies`，正是为了让不匹配当前主机的那五个被跳过而不是导致安装失败——反过来说，用 `--omit=optional` 安装会什么都装不到，这种情况下启动器会明确告诉你缺哪个包。
+
+不想经过 npm 的话，每个 [release](https://github.com/1molchuan/tunnet-lite/releases) 都附带预编译二进制。
+
+## 首次运行
+
+`tunnet-lite` 把状态存在**当前工作目录**：节点清单、控制面身份、记录的证书 pin、缓存的根域名，都以文件形式落在那里。**选定一个目录并固定用它**，否则下次运行等于从零开始，还得重新授权一遍。
+
+```bash
+mkdir -p ~/.tunnet-lite && cd ~/.tunnet-lite
+
 tunnet-lite -refresh
+```
+
+第一次 `-refresh` 会创建身份并打印一个验证链接。浏览器打开、批准，然后再跑一次 `-refresh` 取回节点目录。之后的刷新都是静默的。
+
+会生成四个文件，**四个都是凭据**，请当作 SSH 私钥对待：
+
+| 文件 | 内容 |
+|---|---|
+| `nodes.json` | 节点目录，含每个出口的加密密钥 |
+| `tunnet-lite-identity.json` | 账号 ID 及其签名私钥 |
+| `tunnet-lite-pins.json` | 首次连接时记录的证书 pin |
+| `tunnet-lite-state.json` | 缓存的根域名 |
+
+## 日常使用
+
+```bash
+cd ~/.tunnet-lite
 tunnet-lite -console
-```
-
-程序本身是 Go 二进制而不是 JavaScript；用 npm 只是为了把它装到机器上并让 `tunnet-lite` 进 PATH。二进制放在按平台拆分的包里，由 npm 的 `os` / `cpu` 字段选中，所以安装只会下载**一个约 12 MB** 的包，而不是六个平台的构建。
-
-这些平台包被声明为 `optionalDependencies`，正是为了让不匹配当前主机的那五个被跳过而不是导致安装失败——反过来说，用 `--omit=optional` 安装会什么都装不到，这种情况下启动器会明确告诉你。
-
-如果你不想经过 npm，每个 GitHub Release 也附带了预编译二进制。
-
-## 从源码构建
-
-`xray-core` 通过 `replace` 钉死到同级目录的一份 checkout，并且需要 `patches/` 里的两个补丁——运营商前置代理和入口故障转移都依赖它们。这一步只做一次：
-
-```bash
-git clone https://github.com/XTLS/Xray-core.git ../xray-tunnet
-git -C ../xray-tunnet checkout f02a35786124a6ad046727f2408e32317cc19a41
-git -C ../xray-tunnet apply "$PWD/patches/xray-core-http-outbound.patch"
-```
-
-然后：
-
-```bash
-go build -o tunnet-lite ./
-
-# 一次性：创建身份并拉取节点目录。
-# 首次运行会打印验证链接，浏览器批准后再运行一次。
-./tunnet-lite -refresh
-
-./tunnet-lite -console
 ```
 
 ```
@@ -65,13 +69,28 @@ listening    socks5://127.0.0.1:18080 (tcp only)
 exit         sin-01 — 新加坡 SIN 01
 ```
 
+| 命令 | 作用 |
+|---|---|
+| `status` | 显示当前运行状态 |
+| `exits` | 列出出口节点 |
+| `entries` | 列出运营商入口 |
+| `exit <slug\|编号>` | 选择出口节点 |
+| `entry <名称\|编号>` | 选择运营商入口 |
+| `route global\|smart` | 选择隧道承载多少流量 |
+| `udp on\|off` | 开关 SOCKS UDP associate |
+| `direct on\|off` | 绕过前置代理 |
+| `start` | 应用当前选择 |
+| `stop` | 停止代理 |
+| `refresh` | 拉取最新节点目录 |
+| `quit` | 退出，代理随之停止 |
+
+**选择在执行 `start` 之前不会生效**——`start` 会重新探测入口池并重建隧道。
+
 不加 `-console` 就直接起代理并一直服务到被中断，适合放在服务管理器下：
 
 ```bash
-./tunnet-lite -host tyo-01 -entry-group 电信
+tunnet-lite -host tyo-01 -entry-group 电信
 ```
-
-`nodes.json`、`tunnet-lite-identity.json`、`tunnet-lite-pins.json` 分别是你的账号凭据、签名私钥和已固定的证书。三个都在 `.gitignore` 里，**绝不能提交到版本控制**。
 
 ### 让流量走它
 
@@ -81,24 +100,16 @@ curl --proxy socks5h://127.0.0.1:18080 https://api.ipify.org
 
 **用 `socks5h`，不要用 `socks5`。** 结尾那个 `h` 表示域名在代理侧解析。裸 `socks5` 会在本地走 UDP 解析，而这些节点不承载 UDP（见下文），等于把查询漏在了隧道外面。Firefox 里对应的开关是 `network.proxy.socks_remote_dns`。
 
-### 控制台命令
+### 开启分流
 
-| 命令 | 作用 |
-|---|---|
-| `status` | 显示当前运行状态 |
-| `exits` | 列出出口节点 |
-| `entries` | 列出运营商入口 |
-| `exit <slug\|编号>` | 选择出口节点 |
-| `entry <名称\|编号>` | 选择运营商入口 |
-| `udp on\|off` | 开关 SOCKS UDP associate |
-| `direct on\|off` | 绕过前置代理 |
-| `route global\|smart` | 选择隧道承载多少流量 |
-| `start` | 应用当前选择 |
-| `stop` | 停止代理 |
-| `refresh` | 拉取最新节点目录 |
-| `quit` | 退出，代理随之停止 |
+默认全部走隧道。想让中国大陆目标直连，取一次规则集再切模式：
 
-**选择在执行 `start` 之前不会生效**——`start` 会重新探测入口池并重建隧道。
+```bash
+tunnet-lite -fetch-rules -assets ~/.tunnet-lite/assets
+tunnet-lite -route smart -assets ~/.tunnet-lite/assets
+```
+
+`-fetch-rules` 会先用官方发布的摘要校验再安装，已是最新的文件会跳过。两种模式的区别见下文[分流](#分流)一节。
 
 ### 常用参数
 
@@ -106,19 +117,32 @@ curl --proxy socks5h://127.0.0.1:18080 https://api.ipify.org
 |---|---|
 | `-console` | 进入交互控制台，而不是只做服务 |
 | `-refresh` | 从控制面拉取节点目录后退出 |
+| `-fetch-rules` | 下载分流规则集后退出 |
 | `-host tyo-01` | 指定出口 slug（默认：第一个在线出口） |
 | `-entry-group 电信` | 按名称或子串指定运营商入口 |
-| `-no-front` | 直连 CDN，跳过前置代理 |
-| `-root <域名>` | 钉住某个根域名，不用缓存的选择 |
-| `-dump-config` | 打印生成的 Xray 配置后退出 |
-| `-port 18080` | SOCKS 端口 |
 | `-route smart` | 中国大陆目标直连（需要规则集） |
 | `-assets <目录>` | `geoip.dat` 和 `geosite.dat` 所在目录 |
+| `-no-front` | 直连 CDN，跳过前置代理 |
+| `-root <域名>` | 钉住某个根域名，不用缓存的选择 |
+| `-port 18080` | SOCKS 端口 |
 | `-refresh-interval 6h` | 后台监视节点变化并提示（永不自动应用） |
+| `-dump-config` | 打印生成的 Xray 配置后退出 |
 | `-doh <地址>` | 逗号分隔的纯 IP DoH 上游；`off` 表示用系统 DNS |
 | `-ech=true` | 控制面连接强制要求 ECH，失败即中止 |
 | `-pin-mode tofu` | 证书固定模式：`off`、`tofu`、`strict` |
 | `-pins <路径>` | pin 存储路径（默认 `tunnet-lite-pins.json`） |
+
+## 从源码构建
+
+`xray-core` 通过 `replace` 钉死到同级目录的一份 checkout，并且 `patches/` 里的 CONNECT 补丁是运营商前置代理能工作的前提：
+
+```bash
+git clone https://github.com/XTLS/Xray-core.git ../xray-tunnet
+git -C ../xray-tunnet checkout f02a35786124a6ad046727f2408e32317cc19a41
+git -C ../xray-tunnet apply "$PWD/patches/xray-core-http-outbound.patch"
+
+go build -o tunnet-lite ./
+```
 
 ## 分流
 
